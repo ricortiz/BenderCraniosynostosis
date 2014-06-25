@@ -21,25 +21,12 @@
 // Bender includes
 #include "FEMAnalysisCLP.h"
 #include "benderIOUtils.h"
-#include "vtkQuaternion.h"
 
 // OpenGL includes
 //#include <GL/glew.h>
 //#include <GL/glut.h>
 
 // SOFA includes
-#include <sofa/component/collision/BaseContactMapper.h>
-#include <sofa/component/collision/BruteForceDetection.h>
-#include <sofa/component/collision/DefaultCollisionGroupManager.h>
-#include <sofa/component/collision/DefaultContactManager.h>
-#include <sofa/component/collision/DefaultPipeline.h>
-#include <sofa/component/collision/LineModel.h>
-#include <sofa/component/collision/LocalMinDistance.h>
-#include <sofa/component/collision/MinProximityIntersection.h>
-#include <sofa/component/collision/NewProximityIntersection.h>
-#include <sofa/component/collision/PointModel.h>
-#include <sofa/component/collision/TriangleModel.h>
-#include <sofa/component/engine/BoxROI.h>
 #include <sofa/component/linearsolver/CGLinearSolver.h>
 #include <sofa/component/mapping/BarycentricMappingRigid.h>
 #include <sofa/component/misc/RequiredPlugin.h>
@@ -47,7 +34,6 @@
 #include <sofa/component/odesolver/EulerImplicitSolver.h>
 #include <sofa/component/odesolver/EulerSolver.h>
 #include <sofa/component/projectiveconstraintset/FixedConstraint.h>
-#include <sofa/component/projectiveconstraintset/SkeletalMotionConstraint.h>
 #include <sofa/component/topology/MeshTopology.h>
 #include <sofa/component/typedef/Sofa_typedef.h>
 #include <sofa/gui/GUIManager.h>
@@ -75,11 +61,19 @@
 #endif
 
 // ITK include
+#include <itkImageFileReader.h>
 #include <itkImage.h>
-#include <itkImageFileReader.h>
+#include <itkMesh.h>
+#include <itkTetrahedronCell.h>
 #include <itkVector.h>
-#include <itkImageFileReader.h>
 #include <itkVectorLinearInterpolateImageFunction.h>
+#include <itkVTKTetrahedralMeshReader.h>
+#include <itkTranslationTransform.h>
+#include <itkEuclideanDistancePointMetric.h>
+#include <itkLevenbergMarquardtOptimizer.h>
+#include <itkPointSetToPointSetRegistrationMethod.h>
+#include <itkDanielssonDistanceMapImageFilter.h>
+#include <itkPointSetToImageFilter.h>
 
 // BenderVTK includes
 #include <vtkDualQuaternion.h>
@@ -123,6 +117,45 @@ using namespace sofa::component::shapefunction;
 using namespace sofa::helper;
 using namespace sofa::simulation;
 
+class CommandIterationUpdate : public itk::Command
+{
+public:
+  typedef  CommandIterationUpdate   Self;
+  typedef  itk::Command             Superclass;
+  typedef itk::SmartPointer<Self>   Pointer;
+  itkNewMacro( Self );
+
+protected:
+  CommandIterationUpdate() {};
+
+public:
+
+  typedef itk::LevenbergMarquardtOptimizer     OptimizerType;
+  typedef const OptimizerType *                OptimizerPointer;
+
+  void Execute(itk::Object *caller, const itk::EventObject & event)
+  {
+    Execute( (const itk::Object *)caller, event);
+  }
+
+  void Execute(const itk::Object * object, const itk::EventObject & event)
+  {
+    OptimizerPointer optimizer =
+    dynamic_cast< OptimizerPointer >( object );
+
+    if( ! itk::IterationEvent().CheckEvent( &event ) )
+    {
+      return;
+    }
+
+    std::cout << "Value = " << optimizer->GetCachedValue() << std::endl;
+    std::cout << "Position = "  << optimizer->GetCachedCurrentPosition();
+    std::cout << std::endl << std::endl;
+
+  }
+
+};
+
 /// helper function for more compact component creation
 // ---------------------------------------------------------------------
 template<class Component>
@@ -137,10 +170,10 @@ typename Component::SPtr addNew( Node::SPtr parentNode, std::string name="" )
 
 // Copy point positions from vtk to a mechanical object
 // ---------------------------------------------------------------------
-void copyVertices( vtkPoints* points,
+void copyVertices( itk::Mesh<float,3>::PointsContainer * points,
                    MechanicalObject<Vec3Types>* mechanicalMesh)
 {
-  vtkIdType numberOfPoints = points->GetNumberOfPoints();
+  vtkIdType numberOfPoints = points->Size();
 
   vtkIdType meshPointId = mechanicalMesh->getSize() > 1 ? mechanicalMesh->getSize() : 0;
   mechanicalMesh->resize(numberOfPoints);
@@ -151,10 +184,13 @@ void copyVertices( vtkPoints* points,
   // Copy vertices from vtk mesh
   MechanicalObject<Vec3Types>::VecCoord &vertices = *x->beginEdit();
 
-  for(vtkIdType i = 0, end = points->GetNumberOfPoints(); i < end; ++i)
+  for(vtkIdType i = 0; i < numberOfPoints; ++i)
     {
+    itk::Point <float> vertex = points->GetElement(i);
     Vector3 point;
-    points->GetPoint(i,point.ptr());
+    point[0] = vertex[0];
+    point[1] = vertex[1];
+    point[2] = vertex[2];
     vertices[meshPointId++] = point;
     }
   if (meshPointId != numberOfPoints)
@@ -224,10 +260,13 @@ Node::SPtr createVisualNode(Node *                        parentNode,
 // ---------------------------------------------------------------------
 MechanicalObject<Vec3Types>::SPtr createGhostPoints(
   Node *       parentNode,
-  itk::Image<itk::Vector<float,3>,3>* displacementField,
-  vtkPolyData* mesh
+  itk::TranslationTransform< double,3>* transform,
+  itk::Mesh<float,3> *mesh
   )
 {
+  typedef itk::Mesh<float,3>::PointsContainer PointsContainer;
+  itk::TranslationTransform< double,3>::OutputPointType OutputPointType;
+
   MechanicalObject<Vec3Types>::SPtr ghostDOF =
     addNew<MechanicalObject<Vec3Types> >(parentNode, "ghostDOF");
 
@@ -236,10 +275,9 @@ MechanicalObject<Vec3Types>::SPtr createGhostPoints(
   std::cout << "Number of points: " << numberOfPoints << std::endl;
 
   // Traverse mesh nodes
-  vtkSmartPointer<vtkPoints> points = mesh->GetPoints();
-  itk::VectorLinearInterpolateImageFunction<itk::Image<itk::Vector<float,3>,3>, double>::Pointer interpolator
-    = itk::VectorLinearInterpolateImageFunction<itk::Image<itk::Vector<float,3>,3>, double>::New();
-  interpolator->SetInputImage(displacementField);
+  PointsContainer *points = mesh->GetPoints();
+  itk::TranslationTransform< double,3>::InputPointType  fixedPoint;
+  itk::TranslationTransform< double,3>::OutputPointType movingPoint;
 
   ghostDOF->resize(numberOfPoints);
   Data<MechanicalObject<Vec3Types>::VecCoord> *x =
@@ -248,18 +286,12 @@ MechanicalObject<Vec3Types>::SPtr createGhostPoints(
   MechanicalObject<Vec3Types>::VecCoord &vertices = *x->beginEdit();
   for(size_t i = 0; i < numberOfPoints; ++i)
     {
-    Vector3 point;
-    points->GetPoint(i, point.ptr());
+    fixedPoint = points->GetElement(i);
+  movingPoint = transform->TransformPoint(fixedPoint);
 
-    itk::Point<double> index;
-    index[0] = point[0];
-    index[1] = point[1];
-    index[2] = point[2];
-    itk::Vector<float,3> dx = interpolator->Evaluate(index);
-
-    vertices[i][0] = point[0]+dx[0];
-    vertices[i][1] = point[1]+dx[1];
-    vertices[i][2] = point[2]+dx[2];
+    vertices[i][0] = fixedPoint[0] + movingPoint[0];
+    vertices[i][1] = fixedPoint[1] + movingPoint[1];
+    vertices[i][2] = fixedPoint[2] + movingPoint[2];
 
     }
   x->endEdit();
@@ -334,17 +366,16 @@ void createFiniteElementModel(Node* parentNode, bool linearFEM,
 /// the corresponding MeshTopology.
 // ---------------------------------------------------------------------
 MechanicalObject<Vec3Types>::SPtr loadMesh(Node*               parentNode,
-                                           vtkPolyData *       polyMesh
+                                           itk::Mesh<float,3> *polyMesh
                                            )
 {
-  // load mesh
-  vtkSmartPointer<vtkPoints>    points;
-  vtkSmartPointer<vtkCellArray> tetras;
-  vtkSmartPointer<vtkCellData>  data;
+  typedef itk::Mesh<float,3>::CellType CellType;
+  typedef itk::Mesh<float,3>::CellsContainer::ConstIterator  CellIterator;
+  typedef itk::TetrahedronCell< CellType >  TetrahedronType;
 
-  points = polyMesh->GetPoints();
-  tetras = polyMesh->GetPolys();
-  data   = polyMesh->GetCellData();
+  // load mesh
+  itk::Mesh<float,3>::PointsContainer *points = polyMesh->GetPoints();
+  itk::Mesh<float,3>::CellsContainer *tetras = polyMesh->GetCells();
 
   std::stringstream meshName;
   meshName << "Mesh";
@@ -353,7 +384,7 @@ MechanicalObject<Vec3Types>::SPtr loadMesh(Node*               parentNode,
   MechanicalObject<Vec3Types>::SPtr mechanicalMesh =
     addNew<MechanicalObject<Vec3Types> >(parentNode,meshName.str());
 
-  copyVertices(points.GetPointer(),mechanicalMesh.get());
+  copyVertices(points,mechanicalMesh.get());
 
   // Create the MeshTopology
   MeshTopology::SPtr meshTopology = addNew<MeshTopology>(parentNode, "Topology");
@@ -362,26 +393,25 @@ MechanicalObject<Vec3Types>::SPtr loadMesh(Node*               parentNode,
   // Copy tetrahedra array from vtk cell array
   MeshTopology::SeqTetrahedra& tetrahedra =
     *meshTopology->seqTetrahedra.beginEdit();
-  tetrahedra.reserve(tetras->GetNumberOfCells());
 
-  std::cout << "Total # of tetrahedra: " << tetras->GetNumberOfCells()
+  tetrahedra.reserve(polyMesh->GetNumberOfCells());
+
+  std::cout << "Total # of tetrahedra: " << polyMesh->GetNumberOfCells()
             << std::endl;
 
-  tetras->InitTraversal();
+ CellIterator cellIterator = tetras->Begin();
+ CellIterator cellEnd = tetras->End();
+ while(cellIterator != cellEnd)
+ {
+   CellType *cell = cellIterator.Value();
+   TetrahedronType *tet = static_cast<TetrahedronType*>(cell);
+   const itk::IdentifierType *vertexIds = tet->GetPointIds();
+   tetrahedra.push_back(MeshTopology::Tetra(vertexIds[0], vertexIds[1], vertexIds[2], vertexIds[3]));
+   ++cellIterator;
+ }
+ meshTopology->seqTetrahedra.endEdit();
+ return mechanicalMesh;
 
-  vtkNew<vtkIdList> element;
-  for (vtkIdType cellId = 0; tetras->GetNextCell(element.GetPointer());++cellId)
-    {
-    if(element->GetNumberOfIds() != 4)
-      {
-      std::cerr << "Error: Non-tetrahedron encountered." << std::endl;
-      continue;
-      }
-
-    tetrahedra.push_back(MeshTopology::Tetra(element->GetId(0), element->GetId(1), element->GetId(2), element->GetId(3)));
-    }
-  meshTopology->seqTetrahedra.endEdit();
-  return mechanicalMesh;
 }
 
 
@@ -422,10 +452,11 @@ void createEulerSolverNode(Node::SPtr         parentNode,
 }
 
 //------------------------------------------------------------------------------
-void initMesh(vtkPolyData* outputPolyData, vtkPolyData* inputPolyData,
-              Node::SPtr anatomicalMesh)
+void initMesh(vtkPolyData* outputPolyData, Node::SPtr anatomicalMesh)
 {
   MeshTopology *topology = anatomicalMesh->getNodeObject<MeshTopology>();
+  MechanicalObject3 *dof = anatomicalMesh->getNodeObject<MechanicalObject3>();
+
   vtkNew<vtkPoints> points;
   const vtkIdType numberOfPoints = topology->getNbPoints();
   points->SetNumberOfPoints(numberOfPoints);
@@ -450,14 +481,32 @@ void initMesh(vtkPolyData* outputPolyData, vtkPolyData* inputPolyData,
     }
   outputPolyData->SetPolys(cells.GetPointer());
 
-  for (int i = 0; i < inputPolyData->GetPointData()->GetNumberOfArrays(); ++i)
-    {
-    outputPolyData->GetPointData()->AddArray(inputPolyData->GetPointData()->GetArray(i));
-    }
-  for (int i = 0; i < inputPolyData->GetCellData()->GetNumberOfArrays(); ++i)
-    {
-    outputPolyData->GetCellData()->AddArray(inputPolyData->GetCellData()->GetArray(i));
-    }
+  vtkNew<vtkFloatArray> forceVectors;
+  forceVectors->SetNumberOfComponents(3);
+
+  const VecDeriv3 &forces = *dof->getF();
+  forceVectors->SetNumberOfTuples(forces.size());
+
+  for(size_t i = 0, end = forces.size(); i< end; ++i)
+  {
+    float f[3] = {0};
+    f[0] = forces[i][0];
+    f[1] = forces[i][1];
+    f[2] = forces[i][2];
+
+    forceVectors->SetTupleValue(i,f);
+  }
+
+
+
+//   for (int i = 0; i < inputPolyData->GetPointData()->GetNumberOfArrays(); ++i)
+//     {
+//     outputPolyData->GetPointData()->AddArray(inputPolyData->GetPointData()->GetArray(i));
+//     }
+//   for (int i = 0; i < inputPolyData->GetCellData()->GetNumberOfArrays(); ++i)
+//     {
+//     outputPolyData->GetCellData()->AddArray(inputPolyData->GetCellData()->GetArray(i));
+//     }
 
 }
 
@@ -500,14 +549,136 @@ double meanSquareError(MechanicalObject<Vec3Types>::SPtr mesh1,
   return error;
 }
 
+itk::TranslationTransform< double,3>::Pointer
+registerMeshes(itk::PointSet<float,3> *fixedMesh, itk::PointSet<float,3> *movingMesh, bool Verbose = false)
+{
+  typedef itk::PointSet<float,3> PointSetType;
+  if (Verbose)
+  {
+    std::cout << "************************************************************"
+    << std::endl;
+    std::cout << "Number of moving Points = " << movingMesh->GetNumberOfPoints( ) << std::endl;
+  }
+  if (Verbose)
+  {
+    std::cout << "************************************************************"
+    << std::endl;
+    std::cout << "Number of fixed Points = " << fixedMesh->GetNumberOfPoints() << std::endl;
+  }
+  //-----------------------------------------------------------
+  // Set up  the Metric
+  //-----------------------------------------------------------
+  typedef itk::EuclideanDistancePointMetric<PointSetType,PointSetType> MetricType;
+  MetricType::Pointer  metric = MetricType::New();
+  if (Verbose)
+  {
+    std::cout << "************************************************************"
+    << std::endl;
+    std::cout << "registerMeshes(): Set up a Transform..." << std::endl;
+  }
+  //-----------------------------------------------------------
+  // Set up a Transform
+  //-----------------------------------------------------------
+  typedef itk::TranslationTransform< double, 3> TransformType;
+  TransformType::Pointer transform = TransformType::New();
+  // Optimizer Type
+  typedef itk::LevenbergMarquardtOptimizer OptimizerType;
+  OptimizerType::Pointer optimizer = OptimizerType::New();
+  optimizer->SetUseCostFunctionGradient(false);
+  // Registration Method
+  typedef itk::PointSetToPointSetRegistrationMethod<PointSetType,PointSetType> RegistrationType;
+  RegistrationType::Pointer   registration  = RegistrationType::New();
+  // Scale the translation components of the Transform in the Optimizer
+  OptimizerType::ScalesType scales( transform->GetNumberOfParameters() );
+  scales.Fill( 0.01 );
+  const unsigned long numberOfIterations =  100;
+  const double        gradientTolerance  =  1e-5;    // convergence criterion
+  const double        valueTolerance     =  1e-5;    // convergence criterion
+  const double        epsilonFunction    =  1e-6;   // convergence criterion
+  optimizer->SetScales( scales );
+  optimizer->SetNumberOfIterations( numberOfIterations );
+  optimizer->SetValueTolerance( valueTolerance );
+  optimizer->SetGradientTolerance( gradientTolerance );
+  optimizer->SetEpsilonFunction( epsilonFunction );
+  // Start from an Identity transform (in a normal case, the user
+  // can probably provide a better guess than the identity...
+  transform->SetIdentity();
+  registration->SetInitialTransformParameters( transform->GetParameters() );
+
+  //------------------------------------------------------
+  // Connect all the components required for Registration
+  //------------------------------------------------------
+  registration->SetMetric(        metric        );
+  registration->SetOptimizer(     optimizer     );
+  registration->SetTransform(     transform     );
+  registration->SetFixedPointSet( fixedMesh );
+  registration->SetMovingPointSet(   movingMesh   );
+
+  if (Verbose)
+  {
+    std::cout << "************************************************************"
+    << std::endl;
+    std::cout << "registerMeshes(): Prepare the Distance Map..." << std::endl;
+  }
+  //------------------------------------------------------
+  // Prepare the Distance Map in order to accelerate
+  // distance computations.
+  //------------------------------------------------------
+  //
+  //  First map the Fixed Points into a binary image.
+  //  This is needed because the DanielssonDistance
+  //  filter expects an image as input.
+  //
+  //-------------------------------------------------
+  typedef itk::Image< unsigned char,  3 >  BinaryImageType;
+  typedef itk::PointSetToImageFilter<PointSetType,BinaryImageType> PointsToImageFilterType;
+  PointsToImageFilterType::Pointer pointsToImageFilter = PointsToImageFilterType::New();
+  pointsToImageFilter->SetInput( fixedMesh );
+  BinaryImageType::SpacingType spacing;
+  spacing.Fill( 1.0 );
+  BinaryImageType::PointType origin;
+  origin.Fill( 0.0 );
+  pointsToImageFilter->SetSpacing( spacing );
+  pointsToImageFilter->SetOrigin( origin   );
+  pointsToImageFilter->Update();
+  BinaryImageType::Pointer binaryImage = pointsToImageFilter->GetOutput();
+  typedef itk::Image< unsigned short, 3 >  DistanceImageType;
+  typedef itk::DanielssonDistanceMapImageFilter<BinaryImageType, DistanceImageType> DistanceFilterType;
+  DistanceFilterType::Pointer distanceFilter = DistanceFilterType::New();
+  distanceFilter->SetInput( binaryImage );
+  distanceFilter->Update();
+  metric->SetDistanceMap( distanceFilter->GetOutput() );
+  // Connect an observer
+  CommandIterationUpdate::Pointer observer = CommandIterationUpdate::New();
+  optimizer->AddObserver( itk::IterationEvent(), observer );
+  try
+  {
+
+    if (Verbose)
+    {
+      std::cout << "************************************************************"
+      << std::endl;
+      std::cout << "registerMeshes(): Execute registration..." << std::endl;
+    }
+    registration->Update();
+  }
+  catch( itk::ExceptionObject & e )
+  {
+    std::cout << e << std::endl;
+  }
+  std::cout << "Solution = " << transform->GetParameters() << std::endl;
+  return transform;
+}
+
 //------------------------------------------------------------------------------
 int main(int argc, char* argv[])
 {
   PARSE_ARGS;
 
-  typedef itk::Vector<float,3> ImagePixelType;
-  typedef itk::Image<ImagePixelType,3> DisplacementFieldType;
-  typedef itk::ImageFileReader<DisplacementFieldType> DisplacementFieldReaderType;
+  typedef float PixelType;
+  typedef itk::Mesh<PixelType,3> MeshType;
+
+  typedef itk::VTKTetrahedralMeshReader<MeshType> MeshReaderType;
 
   const double dt = 0.0001;
 
@@ -536,19 +707,34 @@ int main(int argc, char* argv[])
     }
 
   // Read vtk data
-  vtkSmartPointer<vtkPolyData> fixedMesh;
-  fixedMesh.TakeReference(
-    bender::IOUtils::ReadPolyData(FixedImageMesh.c_str(),!IsMeshInRAS));
+  MeshReaderType::Pointer vtkFixedMeshReader = MeshReaderType::New();
+  vtkFixedMeshReader->SetFileName(FixedImageMesh);
+  MeshReaderType::Pointer vtkMovingMeshReader = MeshReaderType::New();
+  vtkMovingMeshReader->SetFileName(MovingImageMesh);
 
-  vtkSmartPointer<vtkPolyData> movingMesh;
-  movingMesh.TakeReference(
-    bender::IOUtils::ReadPolyData(MovingImageMesh.c_str(),!IsMeshInRAS));
+  try
+  {
+    std::cerr << "Trying to read..." << std::endl;
+    vtkFixedMeshReader->Update();
+    vtkMovingMeshReader->Update();
+  }
+  catch( itk::ExceptionObject & excp )
+  {
+    std::cerr << "Error during vtkFixedMeshReader->Update() and vtkMovingMeshReader->Update() " << std::endl;
+    std::cerr << excp << std::endl;
+    return EXIT_FAILURE;
+  }
 
-  DisplacementFieldType::Pointer displacementField;
-  DisplacementFieldReaderType::Pointer reader = DisplacementFieldReaderType::New();
-  reader->SetFileName(DisplacementField.c_str());
-  reader->Update();
-  displacementField = reader->GetOutput();
+  MeshType::Pointer fixedMesh = vtkFixedMeshReader->GetOutput();
+  MeshType::Pointer movingMesh = vtkMovingMeshReader->GetOutput();
+
+  if (Verbose)
+  {
+    std::cout << "************************************************************"
+    << std::endl;
+    std::cout << "Register meshes using ICP..." << std::endl;
+  }
+  itk::TranslationTransform< double,3>::Pointer transform = registerMeshes(fixedMesh.GetPointer(),movingMesh.GetPointer(),Verbose);
 
   // Create a scene node
   Node::SPtr sceneNode = root->createChild("FEMSimulation");
@@ -567,7 +753,7 @@ int main(int argc, char* argv[])
 
   Vector6 box;
   MechanicalObject<Vec3Types>::SPtr ghostDOF =
-  createGhostPoints(ghostDOFNode.get(), displacementField, movingMesh );
+  createGhostPoints(ghostDOFNode.get(), transform, movingMesh );
 
   if (Verbose)
     {
@@ -609,7 +795,7 @@ int main(int argc, char* argv[])
 
   double stiffness = 10000.;
   double distance = 1.;
-  const vtkIdType numberOfPoints = fixedMesh->GetPoints()->GetNumberOfPoints();
+  const vtkIdType numberOfPoints = fixedMesh->GetPoints()->Size();
   size_t sample = 0;
   for (vtkIdType pointId = 0; pointId < numberOfPoints; ++pointId)
     {
@@ -707,7 +893,7 @@ int main(int argc, char* argv[])
       }
     }
   vtkNew<vtkPolyData> posedSurface;
-  initMesh(posedSurface.GetPointer(), fixedMesh, skullDOFNode);
+  initMesh(posedSurface.GetPointer(), skullDOFNode);
   if (!IsMeshInRAS)
     {
     vtkNew<vtkTransform> transform;

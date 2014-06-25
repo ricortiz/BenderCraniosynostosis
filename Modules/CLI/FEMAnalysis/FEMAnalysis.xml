@@ -27,14 +27,6 @@
       <index>1</index>
     </geometry>
 
-    <image type="vector">
-      <name>DisplacementField</name>
-      <label>Displacement Field</label>
-      <description><![CDATA[Input displacement field from fixed to moving image.]]></description>
-      <channel>input</channel>
-      <index>2</index>
-    </image>
-
     <geometry fileExtensions=".vtk">
       <name>OutputTetMesh</name>
       <label>Output computed mesh</label>

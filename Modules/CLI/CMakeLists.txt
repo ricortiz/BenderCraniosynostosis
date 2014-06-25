@@ -32,6 +32,7 @@ set(modules
   PoseLabelmap
   VolumeMaterialExtractor
   VotingResample
+  FEMAnalysis
   )
 
 set(Bender_MODULES)

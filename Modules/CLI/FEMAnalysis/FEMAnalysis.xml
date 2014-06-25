@@ -53,20 +53,20 @@
       <description><![CDATA[Use linear FEM. This speeds up the initialization step.]]></description>
       <default>true</default>
     </boolean>
-    <scalar>
+    <double>
       <name>youngModulus</name>
       <label>Young Modulus</label>
       <longflag>--youngModulus</longflag>
       <description><![CDATA[An uniform Young modulus parameter.]]></description>
       <default>100000</default>
-    </scalar>
-    <scalar>
+    </double>
+    <double>
       <name>poissonRatio</name>
       <label>Poisson Ratio</label>
       <longflag>--poissonRatio</longflag>
       <description><![CDATA[An uniform Poisson ratio parameter.]]></description>
       <default>100000</default>
-    </scalar>
+    </double>
   </parameters>
   <parameters>
     <label>Animation</label>

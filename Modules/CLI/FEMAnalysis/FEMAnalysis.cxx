@@ -19,7 +19,7 @@
    =========================================================================*/
 
 // Bender includes
-#include "SimulatePoseCLP.h"
+#include "FEMAnalysisCLP.h"
 #include "benderIOUtils.h"
 #include "vtkQuaternion.h"
 
@@ -76,6 +76,7 @@
 
 // ITK include
 #include <itkImage.h>
+#include <itkImageFileReader.h>
 #include <itkVector.h>
 #include <itkImageFileReader.h>
 #include <itkVectorLinearInterpolateImageFunction.h>
@@ -506,7 +507,7 @@ int main(int argc, char* argv[])
 
   typedef itk::Vector<float,3> ImagePixelType;
   typedef itk::Image<ImagePixelType,3> DisplacementFieldType;
-  typedef itk::ImageReader<DisplacementFieldType> DisplacementFieldReaderType;
+  typedef itk::ImageFileReader<DisplacementFieldType> DisplacementFieldReaderType;
 
   const double dt = 0.0001;
 
@@ -564,10 +565,6 @@ int main(int argc, char* argv[])
     std::cout << "Create ghost mesh..." << std::endl;
     }
 
-  // In GUI mode, there is no animation decomposition, forces are computed
-  // between the final pose and the start pose. In non-GUI mode, forces are
-  // recomputed at each step.
-  const double firstFrame = (GUI ? 1. : 1. / NumberOfArmatureSteps);
   Vector6 box;
   MechanicalObject<Vec3Types>::SPtr ghostDOF =
   createGhostPoints(ghostDOFNode.get(), displacementField, movingMesh );

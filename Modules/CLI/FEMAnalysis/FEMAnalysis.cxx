@@ -74,6 +74,11 @@
 #include <plugins/SofaCUDA/sofa/gpu/cuda/CudaUniformMass.h>
 #endif
 
+// ITK include
+#include <itkImage.h>
+#include <itkVector.h>
+#include <itkImageFileReader.h>
+#include <itkVectorLinearInterpolateImageFunction.h>
 
 // BenderVTK includes
 #include <vtkDualQuaternion.h>
@@ -129,115 +134,27 @@ typename Component::SPtr addNew( Node::SPtr parentNode, std::string name="" )
   return component;
 }
 
-// ---------------------------------------------------------------------
-bool isCellInLabel(vtkIdType cellId, vtkIntArray* materialIds, int filterLabel)
-{
-  return materialIds->GetValue(cellId) == filterLabel;
-}
-
-// ---------------------------------------------------------------------
-bool isPointInLabel(vtkIdList* cellIdList, vtkIntArray* materialIds, int filterLabel)
-{
-  // Search if the point belongs to a cell that has the material Id filterLabel.
-  for(vtkIdType c = 0; c < cellIdList->GetNumberOfIds(); ++c)
-    {
-    if (materialIds->GetValue(cellIdList->GetId(c)) == filterLabel)
-      {
-      return true;
-      }
-    }
-  return false;
-}
-
-// ---------------------------------------------------------------------
-bool isPointInLabel(vtkPolyData* polyMesh, int filterLabel, vtkIdType pointId)
-{
-  vtkIntArray* materialIds = vtkIntArray::SafeDownCast(
-    polyMesh->GetCellData()->GetArray("MaterialId"));
-  vtkSmartPointer<vtkIdList> cellIdList =
-    vtkSmartPointer<vtkIdList>::New();
-  polyMesh->GetPointCells(pointId, cellIdList);
-  return isPointInLabel(cellIdList, materialIds, filterLabel);
-}
-
-// ---------------------------------------------------------------------
-vtkIdType countNumberOfPointsInLabel(
-  vtkPolyData* polyMesh, int filterLabel)
-{
-  vtkIdType count = 0;
-
-  vtkPoints* points = polyMesh->GetPoints();
-  vtkIntArray* materialIds = vtkIntArray::SafeDownCast(
-    polyMesh->GetCellData()->GetArray("MaterialId"));
-  if (!points || !materialIds)
-    {
-    std::cerr << "No material ids" << std::endl;
-    return count;
-    }
-  const vtkIdType numberOfPoints = points->GetNumberOfPoints();
-  vtkSmartPointer<vtkIdList> cellIdList =
-    vtkSmartPointer<vtkIdList>::New();
-  for (vtkIdType i = 0; i < numberOfPoints; ++i)
-    {
-    polyMesh->GetPointCells(i, cellIdList);
-    if (isPointInLabel(cellIdList, materialIds, filterLabel))
-      {
-      ++count;
-      }
-    }
-  return count;
-}
-
-
 // Copy point positions from vtk to a mechanical object
 // ---------------------------------------------------------------------
-std::map<vtkIdType, vtkIdType> copyVertices( vtkPoints* points,
-                                             MechanicalObject<Vec3Types>* mechanicalMesh,
-                                             int filter = 0, int label = 0,
-                                             vtkPolyData* polyMesh = 0)
+void copyVertices( vtkPoints* points,
+                   MechanicalObject<Vec3Types>* mechanicalMesh)
 {
-  std::map<vtkIdType,vtkIdType> m;
   vtkIdType numberOfPoints = points->GetNumberOfPoints();
-  if (filter > 0 && polyMesh != 0)
-    {
-    vtkIdType numberOfPointWithLabel =
-      countNumberOfPointsInLabel(polyMesh, label);
-    numberOfPoints = (filter == 2) ? numberOfPoints - numberOfPointWithLabel :
-      numberOfPointWithLabel;
-    }
+
   vtkIdType meshPointId = mechanicalMesh->getSize() > 1 ? mechanicalMesh->getSize() : 0;
   mechanicalMesh->resize(numberOfPoints);
 
-  std::cout << "  Total # of points ";
-  if (filter > 0)
-    {
-    std::cout << "for label " << label;
-    }
-  std::cout  <<  ": " << numberOfPoints;
-  if (filter > 0)
-    {
-    std::cout << " out of " << points->GetNumberOfPoints();
-    }
-  std::cout << " points." << std::endl;
-
   Data<MechanicalObject<Vec3Types>::VecCoord>* x =
-    mechanicalMesh->write(VecCoordId::position());
+    mechanicalMesh->write(sofa::core::VecCoordId::position());
 
   // Copy vertices from vtk mesh
   MechanicalObject<Vec3Types>::VecCoord &vertices = *x->beginEdit();
 
   for(vtkIdType i = 0, end = points->GetNumberOfPoints(); i < end; ++i)
     {
-    if ((filter == 1 && !isPointInLabel(polyMesh, label, i)) ||
-        (filter == 2 && isPointInLabel(polyMesh, label, i)) )
-      {
-      continue;
-      }
     Vector3 point;
     points->GetPoint(i,point.ptr());
-    m[i] = meshPointId;
     vertices[meshPointId++] = point;
-//     std::cout << "vertex[" << i << "] = " << vertices[i] << std::endl;
     }
   if (meshPointId != numberOfPoints)
     {
@@ -245,178 +162,7 @@ std::map<vtkIdType, vtkIdType> copyVertices( vtkPoints* points,
               << meshPointId << std::endl;
     }
   x->endEdit();
-  return m;
 }
-
-
-vtkQuaterniond computeOrientationFromReferenceAxis(Vector3 &head,
-                                                   Vector3 &tail )
-{
-  double         Y[3] = {0.0, 1.0, 0.0};
-  vtkQuaterniond newOrientation;
-  // Code greatly inspired by: http://www.fastgraph.com/makegames/3drotation/ .
-
-  double viewOut[3]; // The View or "new Z" vector.
-  double viewUp[3]; // The Up or "new Y" vector.
-  double viewRight[3]; // The Right or "new X" vector.
-
-  double upMagnitude; // For normalizing the Up vector.
-  double upProjection; // Magnitude of projection of View Vector on World UP.
-
-  // First: calculate and normalize the view vector.
-  vtkMath::Subtract(tail.ptr(), head.ptr(), viewOut);
-
-  // Normalize. This is the unit vector in the "new Z" direction.
-  if (vtkMath::Normalize(viewOut) < 0.0000001)
-    {
-    std::cerr <<
-      "Tail and Head are not enough apart, could not rebuild rest Transform" <<
-      std::endl;
-    return newOrientation;
-    }
-
-  // Now the hard part: The ViewUp or "new Y" vector.
-
-  // The dot product of ViewOut vector and World Up vector gives projection of
-  // of ViewOut on WorldUp.
-  upProjection = vtkMath::Dot(viewOut, Y);
-
-  // First try at making a View Up vector: use World Up.
-  viewUp[0] = Y[0] - upProjection*viewOut[0];
-  viewUp[1] = Y[1] - upProjection*viewOut[1];
-  viewUp[2] = Y[2] - upProjection*viewOut[2];
-
-  // Check for validity:
-  upMagnitude = vtkMath::Norm(viewUp);
-
-  if (upMagnitude < 0.0000001)
-    {
-    // Second try at making a View Up vector: Use Y axis default (0,1,0).
-    viewUp[0] = -viewOut[1]*viewOut[0];
-    viewUp[1] = 1-viewOut[1]*viewOut[1];
-    viewUp[2] = -viewOut[1]*viewOut[2];
-
-    // Check for validity:
-    upMagnitude = vtkMath::Norm(viewUp);
-
-    if (upMagnitude < 0.0000001)
-      {
-      // Final try at making a View Up vector: Use Z axis default (0,0,1).
-      viewUp[0] = -viewOut[2]*viewOut[0];
-      viewUp[1] = -viewOut[2]*viewOut[1];
-      viewUp[2] = 1-viewOut[2]*viewOut[2];
-
-      // Check for validity:
-      upMagnitude = vtkMath::Norm(viewUp);
-
-      if (upMagnitude < 0.0000001)
-        {
-        std::cerr <<
-          "Could not fin a vector perpendiculare to the bone, check the bone values. This should not be happening.";
-        return newOrientation;
-        }
-      }
-    }
-
-  // Normalize the Up Vector.
-  upMagnitude = vtkMath::Normalize(viewUp);
-
-  // Calculate the Right Vector. Use cross product of Out and Up.
-  vtkMath::Cross(viewUp, viewOut, viewRight);
-  vtkMath::Normalize(viewRight); //Let's be paranoid about the normalization.
-
-  // Get the rest transform matrix.
-  newOrientation.SetRotationAngleAndAxis(acos(upProjection), viewRight);
-  newOrientation.Normalize();
-
-  return newOrientation;
-}
-
-// Add the collision model used to resolve collisions
-// ---------------------------------------------------------------------
-void addCollisionModels(Node::SPtr                      collisionNode,
-                        const std::vector<std::string> &elements
-                        )
-{
-  double stiffness = 200.;
-  double friction = 0.;
-  double proximity = 0.9;
-  double restitution = 0.0;
-  for (size_t i=0; i < elements.size(); ++i)
-    {
-    if (elements[i] == "Triangle")
-      {
-      TriangleModel::SPtr triModel = addNew<TriangleModel>(collisionNode,
-        "TriangleCollision");
-      triModel->bothSide.setValue(false);
-      triModel->setSelfCollision(true);
-      triModel->setContactStiffness(stiffness);
-      triModel->setContactFriction(friction);
-      triModel->setContactRestitution(restitution);
-      triModel->setProximity(proximity);
-      }
-    else if(elements[i] == "Line")
-      {
-      LineModel::SPtr lineModel = addNew<LineModel>(collisionNode,
-        "LineCollision");
-      lineModel->bothSide.setValue(false);
-      lineModel->setSelfCollision(true);
-      lineModel->setContactStiffness(stiffness);
-      lineModel->setContactFriction(friction);
-      lineModel->setContactRestitution(restitution);
-      lineModel->setProximity(proximity);
-      }
-    else if (elements[i] == "Point")
-      {
-      PointModel::SPtr pointModel = addNew<PointModel>(collisionNode,
-        "PointCollision");
-      pointModel->bothSide.setValue(false);
-      pointModel->setSelfCollision(true);
-      pointModel->setContactStiffness(stiffness);
-      pointModel->setContactFriction(friction);
-      pointModel->setContactRestitution(restitution);
-      pointModel->setProximity(proximity);
-      }
-    else
-      {
-      std::cerr << "Error: Invalid collision model" << std::endl;
-      return;
-      }
-    }
-}
-
-// Create collision pipeline
-//--------------------------------------------------------------------------
-Node::SPtr createRootWithCollisionPipeline(const std::string& responseType = std::string(
-                                             "default"))
-{
-  //   typedef LocalMinDistance ProximityIntersectionType;
-  typedef MinProximityIntersection ProximityIntersectionType;
-  Node::SPtr root = getSimulation()->createNewGraph("root");
-
-  //Components for collision management
-  //------------------------------------
-  DefaultPipeline::SPtr collisionPipeline =
-    addNew<DefaultPipeline>(root, "Collision Pipeline");
-
-  //--> adding collision detection system
-  addNew<BruteForceDetection>(root,"Detection");
-
-  //--> adding contact manager
-  addNew<DefaultContactManager>(root,"Contact Manager");
-
-  //--> adding component to detection intersection of elements
-  ProximityIntersectionType::SPtr detectionProximity = addNew<ProximityIntersectionType>(root,"Proximity");
-  detectionProximity->setAlarmDistance(0.5);     //warning distance
-  detectionProximity->setContactDistance(0.2);   //min distance before setting a spring to create a repulsion
-  detectionProximity->useSurfaceNormals.setValue(true);
-
-  //--> adding component to handle groups of collision.
-  addNew<DefaultCollisionGroupManager>(root,"Collision Group Manager");
-
-  return root;
-}
-
 
 /// Visualization node (for debug purposes only)
 // ---------------------------------------------------------------------
@@ -474,622 +220,53 @@ Node::SPtr createVisualNode(Node *                        parentNode,
   return visualNode;
 }
 
-// Fill armature joints - rest and final positions
 // ---------------------------------------------------------------------
-template <class T>
-void getBoneCoordinates(
-  vtkPolyData* armature,
-  sofa::helper::vector<SkeletonJoint<T> >& skeletonJoints,
-  sofa::helper::vector<SkeletonBone>& skeletonBones,
-  sofa::helper::vector<typename T::Coord>& restCoordinates,
-  bool invertXY = true)
-{
-  vtkCellArray* armatureSegments = armature->GetLines();
-  vtkCellData*  armatureCellData = armature->GetCellData();
-
-  vtkPoints* points = armature->GetPoints();
-
-  std::cout << "Number of bones: " << armatureSegments->GetNumberOfCells() <<
-    std::endl;
-
-  vtkNew<vtkIdList> cell;
-  armatureSegments->InitTraversal();
-  int edgeId(0);
-  while(armatureSegments->GetNextCell(cell.GetPointer()))
-    {
-    vtkIdType a = cell->GetId(0);
-    vtkIdType b = cell->GetId(1);
-    Vector3   parentJoint(points->GetPoint(a));
-    Vector3   childJoint(points->GetPoint(b));
-
-    double A[12];
-    armatureCellData->GetArray("Transforms")->GetTuple(edgeId, A);
-
-    Matrix3 rotation;
-    Vector3 translation;
-    int     iA(0);
-    for (int i=0; i<3; ++i)
-      {
-      for (int j=0; j<3; ++j,++iA)
-        {
-        rotation(i,j) = A[iA];
-        }
-      }
-    std::cout << "Rotation = " << rotation << std::endl;
-    rotation.transpose();
-    translation[0] = A[9];
-    translation[1] = A[10];
-    translation[2] = A[11];
-
-    if(invertXY)
-      {
-      //    Mat33 flipY;
-      for (int i=0; i<3; ++i)
-        {
-        for (int j=0; j<3; ++j)
-          {
-          if( (i>1 || j>1) && i!=j)
-            {
-            rotation(i,j)*=-1;
-            }
-          }
-        }
-      translation[0]*=-1;
-      translation[1]*=-1;
-      }
-
-    typename T::Coord finalPose,restPosition;
-    Vector3            centerOfMass = 0.5*(childJoint+parentJoint);
-
-    //vtkQuaterniond q = computeOrientationFromReferenceAxis(centerOfMass,
-    //  childJoint);
-
-    //restPosition.getCenter()      = centerOfMass;
-    restPosition = centerOfMass;
-    //restPosition.getOrientation() = Quat3(q.GetX(),q.GetY(),q.GetZ(),q.GetW());
-    restCoordinates.push_back(restPosition);
-
-    //finalPose.getCenter() = rotation*
-    //                        (centerOfMass-parentJoint)+parentJoint+translation;
-    finalPose = rotation* (centerOfMass-parentJoint)+parentJoint+translation;
-
-    //Matrix3 orientation;
-    //restPosition.getOrientation().toMatrix(orientation);
-    //finalPose.getOrientation().fromMatrix(rotation*orientation);
-
-    skeletonJoints.push_back(SkeletonJoint<T>());
-    SkeletonJoint<T>& skeletonJoint = skeletonJoints.back();
-    skeletonJoint.addChannel(restPosition, 0.);
-    skeletonJoint.addChannel(finalPose, 1.);
-    skeletonBones.push_back(edgeId);
-
-    std::cout << "Bone " << skeletonJoint << std::endl;
-
-    ++edgeId;
-    }
-}
-
-/// Load bone mesh into a rigid mechanical object
-//----------------------------------------------------------------------
-MechanicalObject<Vec3Types>::SPtr createRigidBoneSurface(
+MechanicalObject<Vec3Types>::SPtr createGhostPoints(
   Node *       parentNode,
-  vtkPolyData *polyMesh,
-  int          label = 209)
-{
-  vtkSmartPointer<vtkPoints>    points;
-  vtkSmartPointer<vtkCellArray> triangles;
-
-  if(label != 0)
-    {
-    vtkSmartPointer<vtkThreshold> meshThreshold = vtkThreshold::New();
-    meshThreshold->SetInput(polyMesh);
-    meshThreshold->ThresholdBetween(label,label);
-
-    vtkSmartPointer<vtkDataSetSurfaceFilter> surfaceExtractor =
-      vtkDataSetSurfaceFilter::New();
-    surfaceExtractor->SetInput(meshThreshold->GetOutput());
-    surfaceExtractor->Update();
-
-    vtkPolyData *mesh = surfaceExtractor->GetOutput();
-    points    = mesh->GetPoints();
-    triangles = mesh->GetPolys();
-    }
-  else
-    {
-    vtkSmartPointer<vtkDataSetSurfaceFilter> surfaceExtractor =
-      vtkDataSetSurfaceFilter::New();
-    surfaceExtractor->SetInput(polyMesh);
-    surfaceExtractor->Update();
-    points    = polyMesh->GetPoints();
-    triangles = polyMesh->GetPolys();
-    }
-
-  MechanicalObject<Vec3Types>::SPtr boneStructure =
-    addNew<MechanicalObject<Vec3Types> >(parentNode, "boneStructure");
-
-  copyVertices(points,boneStructure.get());
-
-  return boneStructure;
-}
-
-/// Create a mechanical articulated and constrained object
-/// This functions loads initial and final position of the armature and
-/// optionaly creates an animation between the two keyframes
-// ---------------------------------------------------------------------
-MechanicalObject<Rigid3Types>::SPtr createArticulatedFrame(
-  Node *       parentNode,
-  vtkPolyData *armature,
-  bool         generateFrameAnimation = true,
-  bool         invertXY = true
+  itk::Image<itk::Vector<float,3>,3>* displacementField,
+  vtkPolyData* mesh
   )
 {
-  // Extract coordinates
-  sofa::helper::vector<SkeletonJoint<Rigid3Types> > skeletonJoints;
-  sofa::helper::vector<SkeletonBone>                skeletonBones;
-  sofa::helper::vector<Rigid3Types::Coord>          boneCoordinates;
-  getBoneCoordinates(armature, skeletonJoints, skeletonBones,
-                     boneCoordinates, invertXY);
+  MechanicalObject<Vec3Types>::SPtr ghostDOF =
+    addNew<MechanicalObject<Vec3Types> >(parentNode, "ghostDOF");
 
-  MechanicalObject<Rigid3Types>::SPtr articulatedFrame =
-    addNew<MechanicalObject<Rigid3Types> >(parentNode, "articulatedFrame");
-
-  // Get bone positions
-  size_t totalNumberOfBones = boneCoordinates.size();
-  std::cout << "Number of bones: " << totalNumberOfBones << std::endl;
-
-  articulatedFrame->resize(totalNumberOfBones);
-  Data<MechanicalObject<Rigid3Types>::VecCoord> *x =
-    articulatedFrame->write(VecCoordId::position());
-
-  MechanicalObject<Rigid3Types>::VecCoord &vertices = *x->beginEdit();
-
-  for(size_t i = 0, end = totalNumberOfBones; i < end; ++i)
-    {
-    vertices[i] = boneCoordinates[i];
-    std::cout << "Bone[" << i << "] = " << vertices[i] << std::endl;
-    }
-  x->endEdit();
-
-  if(generateFrameAnimation)
-    {
-    // generating a skeletal motion, this creates an animation of the
-    // armature that takes it from initial pose to final pose
-    SkeletalMotionConstraint<Rigid3Types>::SPtr skeletalMotionConstraint =
-      addNew<SkeletalMotionConstraint<Rigid3Types> >(parentNode,
-        "skeletalConstaint");
-
-    skeletalMotionConstraint->setSkeletalMotion(skeletonJoints,skeletonBones);
-    }
-  return articulatedFrame;
-}
-
-//-------------------------------------------------------------------------------
-template<class T>
-inline void InvertXY(T& x)
-{
-  x[0]*=-1;
-  x[1]*=-1;
-}
-typedef itk::Vector<double,3> Vec3;
-typedef itk::Matrix<double,3,3> Mat33;
-//-------------------------------------------------------------------------------
-Mat33 ToItkMatrix(double M[3][3])
-{
-  Mat33 itkM;
-  for (int i=0; i<3; ++i)
-    {
-    for (int j=0; j<3; ++j)
-      {
-      itkM(i,j)  = M[i][j];
-      }
-    }
-
-  return itkM;
-}
-
-//-------------------------------------------------------------------------------
-struct RigidTransform
-{
-  Vec3 O;
-  Vec3 T;
-  Mat33 R;
-  //vtkQuaternion<double> R; //rotation quarternion
-
-  RigidTransform()
-  {
-    //initialize to identity transform
-    T[0] = T[1] = T[2] = 0.0;
-
-    R.SetIdentity();
-
-    O[0]=O[1]=O[2]=0.0;
-  }
-
-  void SetRotation(double* M)
-  {
-    this->R = ToItkMatrix((double (*)[3])M);
-  }
-
-  void SetRotationCenter(const double* center)
-  {
-    this->O = Vec3(center);
-  }
-  void GetRotationCenter(double* center)
-  {
-    center[0] = this->O[0];
-    center[1] = this->O[1];
-    center[2] = this->O[2];
-  }
-
-  void SetTranslation(const double* t)
-  {
-    this->T = Vec3(t);
-  }
-  void GetTranslation(double* t)const
-  {
-    t[0] = this->T[0];
-    t[1] = this->T[1];
-    t[2] = this->T[2];
-  }
-  void GetTranslationComponent(double* tc)const
-  {
-    Vec3 res = this->R*(-this->O) + this->O +T;
-    tc[0] = res[0];
-    tc[1] = res[1];
-    tc[2] = res[2];
-  }
-  void Apply(const double in[3], double out[3]) const
-  {
-    Vec3 x(in);
-    x = this->R*(x-this->O) + this->O +T;
-    out[0] =x[0];
-    out[1] =x[1];
-    out[2] =x[2];
-  }
-};
-
-//-------------------------------------------------------------------------------
-void GetArmatureTransform(vtkPolyData* polyData, vtkIdType cellId,
-                          const char* arrayName, const double* rcenter,
-                          RigidTransform& F,bool invertXY = true)
-{
-  double A[12];
-  polyData->GetCellData()->GetArray(arrayName)->GetTuple(cellId, A);
-
-  double R[3][3];
-  double T[3];
-  double RCenter[3];
-  int iA(0);
-  for (int i=0; i<3; ++i)
-    {
-    for (int j=0; j<3; ++j,++iA)
-      {
-      R[j][i] = A[iA];
-      }
-    }
-
-  for (int i=0; i<3; ++i)
-    {
-    T[i] = A[i+9];
-    RCenter[i] = rcenter[i];
-    }
-
-  if(invertXY)
-    {
-    for (int i=0; i<3; ++i)
-      {
-      for (int j=0; j<3; ++j)
-        {
-        if( (i>1 || j>1) && i!=j)
-          {
-          R[i][j]*=-1;
-          }
-        }
-      }
-    InvertXY(T);
-    }
-
-  F.SetRotation(&R[0][0]);
-  F.SetRotationCenter(RCenter);
-  // Translation between the head in rest and head in pose (translated because of its parent).
-  F.SetTranslation(T);
-}
-
-//-------------------------------------------------------------------------------
-bool WIComp(const std::pair<double, int>& left, const std::pair<double, int>& right)
-{
-  return left.first > right.first;
-}
-
-//-------------------------------------------------------------------------------
-vtkPoints* poseMesh(vtkPolyData* mesh, vtkPolyData* armature,
-                    bool invertXY = true, double coef = 1.,
-                    bool verbose = true)
-{
-  const size_t MaximumNumberOfInterpolatedBones = 4;
-  coef = std::min (1., std::max(0., coef));
-  if (verbose)
-    {
-    std::cout << "Pose mesh for frame: " << coef << std::endl;
-    std::cout << "  Number of mesh points: " << mesh->GetNumberOfPoints() << std::endl;
-    }
-  vtkPoints* outPoints = vtkPoints::New();
-  outPoints->Allocate(mesh->GetNumberOfPoints());
-  outPoints->SetNumberOfPoints(mesh->GetNumberOfPoints());
-
-  //----------------------------
-  // Read armature
-  //----------------------------
-  std::vector<RigidTransform> transforms;
-
-  vtkCellArray* armatureSegments = armature->GetLines();
-  vtkCellData* armatureCellData = armature->GetCellData();
-  vtkNew<vtkIdList> cell;
-  armatureSegments->InitTraversal();
-  int edgeId = 0;
-  if (!armatureCellData->GetArray("Transforms"))
-    {
-    std::cerr << "  No 'Transforms' cell array in armature" << std::endl;
-    }
-  else if (verbose)
-    {
-    std::cout << "  # components: "
-      << armatureCellData->GetArray("Transforms")->GetNumberOfComponents()
-      << std::endl;
-    }
-
-  while(armatureSegments->GetNextCell(cell.GetPointer()))
-    {
-    vtkIdType a = cell->GetId(0);
-    vtkIdType b = cell->GetId(1);
-
-    double ax[3], bx[3];
-    armature->GetPoints()->GetPoint(a, ax);
-    armature->GetPoints()->GetPoint(b, bx);
-
-    RigidTransform transform;
-    GetArmatureTransform(armature, edgeId, "Transforms", ax, transform, invertXY);
-    transforms.push_back(transform);
-    ++edgeId;
-    }
-
-  size_t numSites = transforms.size();
-
-  std::vector<vtkDualQuaternion<double> > dqs;
-  for (size_t i = 0; i < numSites; ++i)
-    {
-    RigidTransform& trans = transforms[i];
-    vtkQuaternion<double> rotation;
-    rotation.FromMatrix3x3((double (*)[3])&trans.R(0,0));
-    double tc[3];
-    trans.GetTranslationComponent(tc);
-    vtkDualQuaternion<double> dq;
-    dq.SetRotationTranslation(rotation, &tc[0]);
-    dqs.push_back(dq);
-    }
-
-  if (verbose)
-    {
-    std::cout<<"  Read "<<numSites<<" transforms"<<std::endl;
-    }
-
-  //------------------------------------------------------
-  // Get the weights
-  //------------------------------------------------------
-
-  // Find out if all the weight have a corresponding array
-  vtkPointData* pointData = mesh->GetPointData();
-  vtkPoints* inputPoints = mesh->GetPoints();
-  int numPoints = mesh->GetNumberOfPoints();
-
-  std::vector<vtkFloatArray*> surfaceVertexWeights;
-  if (verbose)
-    {
-    std::cout<<"Trying to use the " << numSites
-             << " weight field data" << std::endl;
-    }
-
-  size_t numWeights = numSites;
-  for (size_t i = 0; i < numSites; ++i)
-    {
-    vtkFloatArray* weightArray =
-      vtkFloatArray::SafeDownCast(pointData->GetArray(i));
-
-    if (!weightArray || weightArray->GetNumberOfTuples() != numPoints)
-      {
-      //surfaceVertexWeights.clear();
-      numWeights = i;
-
-      std::cerr<<"Could not find field array for weight " << i << std::endl;
-      break;
-      }
-    else
-      {
-      surfaceVertexWeights.push_back(weightArray);
-      }
-    }
-
-  const size_t maximumNumberOfInterpolatedBones =
-    std::min(MaximumNumberOfInterpolatedBones, numWeights - 1);
-  // This property controls whether to interpolate with ScLerp
-  // (Screw Linear interpolation) or DLB (Dual Quaternion Linear
-  // Blending).
-  // Note that DLB (faster) is not tweaked to give proper results.
-  const bool UseScLerp = true;
-
-  if (verbose)
-    {
-    std::cout << "  Pose " << numPoints << "points" << std::endl;
-    }
-
-  //----------------------------
-  // Pose
-  //----------------------------
-  for (vtkIdType pi = 0; pi < numPoints; ++pi)
-    {
-
-    double xraw[3];
-    inputPoints->GetPoint(pi,xraw);
-
-    double wSum = 0.0;
-    for (size_t i = 0; i < numWeights; ++i)
-      {
-      wSum += surfaceVertexWeights[i]->GetValue(pi);
-      }
-
-    Vec3 y(0.0);
-    if (wSum <= 0.0) // shortcut
-      {
-      y = xraw;
-      }
-    else
-      {
-      bool LinearBlend = false;
-      if (LinearBlend)
-        {
-        for (size_t i = 0; i < numWeights; ++i)
-          {
-          double w = surfaceVertexWeights[i]->GetValue(pi) / wSum;
-          double yi[3];
-          const vtkDualQuaternion<double>& transform(dqs[i]);
-          transform.TransformPoint(xraw, yi);
-          vtkDualQuaternion<double> t = transform * coef;
-          t.TransformPoint(xraw, yi);
-          y += w*Vec3(yi);
-          }
-        }
-      else
-        {
-        std::vector<std::pair<double, int> > ws;
-        for (size_t i=0; i < numWeights; ++i)
-          {
-          double w = surfaceVertexWeights[i]->GetValue(pi) / wSum;
-          ws.push_back(std::make_pair(w, i));
-          }
-        // To limit computation errors, it is important to start interpolating with the
-        // highest w first.
-        std::partial_sort(ws.begin(),
-                          ws.begin() + maximumNumberOfInterpolatedBones,
-                          ws.end(),
-                          WIComp);
-        vtkDualQuaternion<double> transform = dqs[ws[0].second];
-        double w = ws[0].first;
-        // Warning, Sclerp is only meant to blend 2 DualQuaternions, I'm not
-        // sure it works with more than 2.
-        for (size_t i=1; i < maximumNumberOfInterpolatedBones; ++i)
-          {
-          double w2 = ws[i].first;
-          int i2 = ws[i].second;
-          vtkDualQuaternion<double> dq;
-          if (UseScLerp)
-            {
-            dq = transform.ScLerp2(w2 / (w + w2), dqs[i2]);
-            // vtkDualQuaternion<double> dq2 = dqs[i2].ScLerp2(w/ (w + w2), dq);
-            // vtkDualQuaternion<double> dq3 = dq.ScLerp(w2/ (w + w2), dqs[i2]);
-            // vtkDualQuaternion<double> dq4 = dqs[i2].ScLerp(w/ (w + w2), dq);
-            }
-          else
-            {
-            dq = transform.Lerp(w2 / (w + w2), dqs[i2]);
-            }
-          transform = dq;
-          w += w2;
-          }
-        transform = transform * coef;
-        transform.TransformPoint(xraw, &y[0]);
-        }
-      }
-
-    //bool IsSurfaceInRAS = invertXY;
-    //if (!IsSurfaceInRAS)
-    //  {
-      //InvertXY(y);
-    //  }
-    outPoints->SetPoint(pi,y[0],y[1],y[2]);
-    }
-  if (verbose)
-    {
-    std::cout << "  outPoints: " << outPoints << " -> "
-              << outPoints->GetNumberOfPoints() << std::endl;
-    }
-  return outPoints;
-}
-
-//------------------------------------------------------------------------------
-void poseMechanicalObject(
-  MechanicalObject<Vec3Types>::SPtr mechanicalObject,
-  vtkPolyData* mesh,
-  vtkPolyData* armature, bool invertArmatureXY,
-  double coef = 1.0)
-{
-  vtkPoints* posedPoints = poseMesh(mesh, armature, invertArmatureXY,
-                                    coef, /*verbose= */false);
-
-  size_t numberOfPoints = posedPoints->GetNumberOfPoints();
-  Data<MechanicalObject<Vec3Types>::VecCoord> *x =
-    mechanicalObject->write(VecCoordId::position());
-
-  MechanicalObject<Vec3Types>::VecCoord &vertices = *x->beginEdit();
-
-  for(size_t i = 0; i < numberOfPoints; ++i)
-    {
-    Vector3 point;
-    posedPoints->GetPoint(i, point.ptr());
-    vertices[i] = point;
-    }
-  x->endEdit();
-  posedPoints->Delete();
-}
-
-// ---------------------------------------------------------------------
-MechanicalObject<Vec3Types>::SPtr createGhostMesh(
-  Node *       parentNode,
-  vtkPolyData *armature,
-  vtkPolyData* mesh,
-  Vector6 &box,
-  bool         invertXY = true,
-  double frame = 1.
-  )
-{
-
-  vtkPoints* posedPoints = poseMesh(mesh, armature, invertXY, frame);
-  MechanicalObject<Vec3Types>::SPtr ghostMesh =
-    addNew<MechanicalObject<Vec3Types> >(parentNode, "ghostMesh");
-
-  // Get bone positions
-
-  size_t numberOfPoints = posedPoints->GetNumberOfPoints();
+  // Get positions
+  size_t numberOfPoints = mesh->GetNumberOfPoints();
   std::cout << "Number of points: " << numberOfPoints << std::endl;
 
-  ghostMesh->resize(numberOfPoints);
+  // Traverse mesh nodes
+  vtkSmartPointer<vtkPoints> points = mesh->GetPoints();
+  itk::VectorLinearInterpolateImageFunction<itk::Image<itk::Vector<float,3>,3>, double>::Pointer interpolator
+    = itk::VectorLinearInterpolateImageFunction<itk::Image<itk::Vector<float,3>,3>, double>::New();
+  interpolator->SetInputImage(displacementField);
+
+  ghostDOF->resize(numberOfPoints);
   Data<MechanicalObject<Vec3Types>::VecCoord> *x =
-    ghostMesh->write(VecCoordId::position());
+    ghostDOF->write(sofa::core::VecCoordId::position());
 
   MechanicalObject<Vec3Types>::VecCoord &vertices = *x->beginEdit();
   for(size_t i = 0; i < numberOfPoints; ++i)
     {
     Vector3 point;
-    posedPoints->GetPoint(i, point.ptr());
-    vertices[i] = point;
+    points->GetPoint(i, point.ptr());
+
+    itk::Point<double> index;
+    index[0] = point[0];
+    index[1] = point[1];
+    index[2] = point[2];
+    itk::Vector<float,3> dx = interpolator->Evaluate(index);
+
+    vertices[i][0] = point[0]+dx[0];
+    vertices[i][1] = point[1]+dx[1];
+    vertices[i][2] = point[2]+dx[2];
+
     }
   x->endEdit();
 
   UniformMass3::SPtr frameMass = addNew<UniformMass3>(parentNode,"FrameMass");
   frameMass->setTotalMass(1);
 
-  posedPoints->ComputeBounds();
-  double bounds[6];
-  posedPoints->GetBounds(bounds);
-
-  box[0] = bounds[0];
-  box[1] = bounds[2];
-  box[2] = bounds[4];
-  box[3] = bounds[1];
-  box[4] = bounds[3];
-  box[5] = bounds[5];
-
-  posedPoints->Delete();
-  return ghostMesh;
+  return ghostDOF;
 }
 
 
@@ -1097,7 +274,8 @@ MechanicalObject<Vec3Types>::SPtr createGhostMesh(
 /// parentNode prior to calling this function.
 // ---------------------------------------------------------------------
 void createFiniteElementModel(Node* parentNode, bool linearFEM,
-                              Vec3Types::VecReal &youngModulus )
+                              const Vec3Types::Real &youngModulus,
+                              const Vec3Types::Real &poissonRatio  )
 {
   if (linearFEM)
     {
@@ -1105,8 +283,8 @@ void createFiniteElementModel(Node* parentNode, bool linearFEM,
       addNew<TetrahedronFEMForceField< Vec3Types > >(parentNode,"femSolver");
     femSolver->setComputeGlobalMatrix(false);
     femSolver->setMethod("large");
-    femSolver->setPoissonRatio(.4);
-    femSolver->_youngModulus.setValue(youngModulus);
+    femSolver->setPoissonRatio(.35);
+    femSolver->setYoungModulus(youngModulus);
     return;
     }
 
@@ -1143,87 +321,19 @@ void createFiniteElementModel(Node* parentNode, bool linearFEM,
       addNew<StabilizedNeoHookeanForceField<U331Types> >(strainNode,"Force Field");
 
     Vec3Types::VecReal &modulus = *forceField->_youngModulus.beginEdit();
-    modulus = youngModulus;
+    modulus[0] = youngModulus;
     forceField->_youngModulus.endEdit();
     Vec3Types::VecReal &poisson = *forceField->_poissonRatio.beginEdit();
-    poisson[0] = 0.3;
+    poisson[0] = poissonRatio;
     forceField->_poissonRatio.endEdit();
     }
 }
-
-// ---------------------------------------------------------------------
-MechanicalObject<Vec3Types>::SPtr loadBoneMesh(Node*               parentNode,
-                                               vtkPolyData *       polyMesh,
-                                               int                 boneLabel = 209)
-{
-  // load mesh
-  vtkSmartPointer<vtkPoints>    points;
-  vtkSmartPointer<vtkCellArray> tetras;
-  vtkSmartPointer<vtkCellData>  data;
-
-  points = polyMesh->GetPoints();
-  tetras = polyMesh->GetPolys();
-  data   = polyMesh->GetCellData();
-
-  std::stringstream meshName;
-  meshName << "BoneMesh";
-
-  // Create mechanical object (dof) for the mesh and extract material parameters
-  MechanicalObject<Vec3Types>::SPtr mechanicalMesh =
-    addNew<MechanicalObject<Vec3Types> >(parentNode,meshName.str());
-
-  std::map<vtkIdType, vtkIdType> m =
-    copyVertices(points.GetPointer(),mechanicalMesh.get(), /*filter =*/1, boneLabel, polyMesh);
-
-  // Create the MeshTopology
-  MeshTopology::SPtr meshTopology = addNew<MeshTopology>(parentNode,"BoneTopology");
-  meshTopology->seqPoints.setParent(&mechanicalMesh->x);
-
-  // Copy tetrahedra array from vtk cell array
-  MeshTopology::SeqTetrahedra& tetrahedra =
-    *meshTopology->seqTetrahedra.beginEdit();
-  // \fixme needed ?
-  //tetrahedra.reserve(tetras->GetNumberOfCells());
-
-  vtkIntArray* materialIds = vtkIntArray::SafeDownCast(
-    polyMesh->GetCellData()->GetArray("MaterialId"));
-
-  tetras->InitTraversal();
-
-  vtkNew<vtkIdList> element;
-  vtkIdType cellCount = 0;
-  for (vtkIdType cellId = 0; tetras->GetNextCell(element.GetPointer());++cellId)
-    {
-    if(element->GetNumberOfIds() != 4)
-      {
-      std::cerr << "Error: Non-tetrahedron encountered." << std::endl;
-      continue;
-      }
-    if (!isCellInLabel(cellId, materialIds, boneLabel))
-      {
-      continue;
-      }
-    tetrahedra.push_back(MeshTopology::Tetra(m[element->GetId(0)],
-                                             m[element->GetId(1)],
-                                             m[element->GetId(2)],
-                                             m[element->GetId(3)]));
-    ++cellCount;
-    }
-  meshTopology->seqTetrahedra.endEdit();
-
-  std::cout << "Total # of bone tetrahedra: " << cellCount
-            << " over " << tetras->GetNumberOfCells() << " cells" << std::endl;
-  return mechanicalMesh;
-}
-
 
 /// Loads a vtk tetrahedral polymesh and creates a mechanical object and
 /// the corresponding MeshTopology.
 // ---------------------------------------------------------------------
 MechanicalObject<Vec3Types>::SPtr loadMesh(Node*               parentNode,
-                                           vtkPolyData *       polyMesh,
-                                           Vec3Types::VecReal &youngModulus,
-                                           int                 boneLabel = -1
+                                           vtkPolyData *       polyMesh
                                            )
 {
   // load mesh
@@ -1242,9 +352,7 @@ MechanicalObject<Vec3Types>::SPtr loadMesh(Node*               parentNode,
   MechanicalObject<Vec3Types>::SPtr mechanicalMesh =
     addNew<MechanicalObject<Vec3Types> >(parentNode,meshName.str());
 
-  std::map<vtkIdType, vtkIdType> skinMap =
-    copyVertices(points.GetPointer(),mechanicalMesh.get(),
-                 /*filter=*/ boneLabel >= 0 ? 2 : 0, boneLabel, polyMesh);
+  copyVertices(points.GetPointer(),mechanicalMesh.get());
 
   // Create the MeshTopology
   MeshTopology::SPtr meshTopology = addNew<MeshTopology>(parentNode, "Topology");
@@ -1254,18 +362,11 @@ MechanicalObject<Vec3Types>::SPtr loadMesh(Node*               parentNode,
   MeshTopology::SeqTetrahedra& tetrahedra =
     *meshTopology->seqTetrahedra.beginEdit();
   tetrahedra.reserve(tetras->GetNumberOfCells());
-  youngModulus.reserve(tetras->GetNumberOfCells());
 
   std::cout << "Total # of tetrahedra: " << tetras->GetNumberOfCells()
             << std::endl;
 
   tetras->InitTraversal();
-
-  vtkDataArray* materialParameters = data->GetArray("MaterialParameters");
-  if (!materialParameters)
-    {
-    std::cerr << "Error: No material parameters data array in mesh" << std::endl;
-    }
 
   vtkNew<vtkIdList> element;
   for (vtkIdType cellId = 0; tetras->GetNextCell(element.GetPointer());++cellId)
@@ -1277,366 +378,11 @@ MechanicalObject<Vec3Types>::SPtr loadMesh(Node*               parentNode,
       }
 
     tetrahedra.push_back(MeshTopology::Tetra(element->GetId(0), element->GetId(1), element->GetId(2), element->GetId(3)));
-    if (materialParameters)
-      {
-      double parameters[2] = {0};
-      materialParameters->GetTuple(cellId, parameters);
-      youngModulus.push_back(parameters[0]);
-      }
     }
   meshTopology->seqTetrahedra.endEdit();
   return mechanicalMesh;
 }
 
-// ---------------------------------------------------------------------
-void skinBoneMesh(Node *                              parentNode,
-                  MechanicalObject<Rigid3Types>::SPtr articulatedFrame,
-                  MechanicalObject<Vec3Types>::SPtr   mechanicalObject,
-                  vtkPolyData *                       armature,
-                  vtkPolyData *                       polyMesh,
-                  int                                 boneLabel = 203
-)
-{
-  typedef SkinningMapping<Rigid3Types, Vec3Types> SkinningMappingType;
-
-  vtkSmartPointer<vtkPoints>    points;
-  vtkSmartPointer<vtkPointData> pointData;
-
-  points = polyMesh->GetPoints();
-  pointData = polyMesh->GetPointData();
-
-  SkinningMappingType::SPtr boneSkinningMapping =
-    addNew<SkinningMappingType>(parentNode,"SkinningMapping");
-  if(boneSkinningMapping->isMechanical())
-    std::cout << "The map is mechanical." << std::endl;
-
-  boneSkinningMapping->setModels(articulatedFrame.get(),
-    mechanicalObject.get());
-
-  vtkIdType numberOfBones = armature->GetNumberOfCells();
-
-  sofa::helper::vector<SVector<SkinningMappingType::InReal> > weights;
-  sofa::helper::vector<SVector<unsigned int> >                indices;
-  sofa::helper::vector<unsigned int>                          nbIds;
-  sofa::helper::vector<float>                                 weightSum;
-
-  vtkIdType numberOfPoints = points->GetNumberOfPoints();
-  vtkIdType numberOfBonePoints = countNumberOfPointsInLabel(polyMesh, boneLabel);
-  indices.resize(numberOfBonePoints);
-  weights.resize(numberOfBonePoints);
-  nbIds.resize(numberOfBonePoints,0);
-  weightSum.resize(numberOfBonePoints, 0.);
-
-  vtkIntArray* materialIds = vtkIntArray::SafeDownCast(
-    polyMesh->GetCellData()->GetArray("MaterialId"));
-  std::cout << "Material IDS: " << materialIds << std::endl;
-
-  vtkSmartPointer<vtkIdList> cellIdList =
-    vtkSmartPointer<vtkIdList>::New();
-  for(vtkIdType boneId = 0; boneId < numberOfBones; ++boneId)
-    {
-    vtkFloatArray *weightArray = vtkFloatArray::SafeDownCast(pointData->GetArray(boneId));
-    if( !weightArray || weightArray->GetNumberOfTuples() != numberOfPoints)
-      {
-      std::cerr << "Error extracting weight array" << boneId << "." << std::endl;
-      continue;
-      }
-
-    vtkIdType meshPointId = 0;
-    for (vtkIdType pointId = 0; pointId < numberOfPoints; ++pointId)
-      {
-      polyMesh->GetPointCells(pointId, cellIdList);
-      if (!isPointInLabel(cellIdList, materialIds, boneLabel))
-        {
-        continue;
-        }
-
-      float weight = weightArray->GetValue(pointId);
-      if (weight < 0.001)
-        {
-        //++meshPointId;
-        //continue;
-        }
-      weights[meshPointId].push_back(weight);
-      indices[meshPointId].push_back(boneId);
-      ++nbIds[meshPointId];
-      weightSum[meshPointId] += weight;
-      ++meshPointId;
-      }
-    if (meshPointId != numberOfBonePoints)
-      {
-      std::cerr << "Mismatch between the number of bones and the number of points" << std::endl;
-      }
-    }
-
-  // Make sure each vertex has at least one valid associated weight
-  // TODO: Normalize weights -> weights[i][*]/weightSum[i]
-  int weightErrorCount = 0;
-  for(size_t i = 0; i < weightSum.size(); ++i)
-    {
-    if(weightSum[i] < 0.0001)
-      {
-      //indices[i].push_back(0);
-      //weights[i].push_back(0.);
-
-      if (++weightErrorCount < 100)
-        {
-        std::cerr << "Error: Vertex " << i << " has no weight." << std::endl;
-        }
-      }
-    }
-  if (weightErrorCount)
-    {
-    std::cerr << "-> " << weightErrorCount << " voxels with no weight. " << std::endl;
-    }
-  boneSkinningMapping->setWeights(weights,indices,nbIds);
-
-}
-
-/// Create a skinning map between mesh and armature (is a distance map)
-/// This uses a Shepard shape function method
-// ---------------------------------------------------------------------
-void skinMesh(Node *                              parentNode,
-              MechanicalObject<Rigid3Types>::SPtr articulatedFrame,
-              MechanicalObject<Vec3Types>::SPtr   mechanicalObject,
-              vtkPolyData *                       armature,
-              vtkPolyData *                       polyMesh,
-              int                                 label = 0
-)
-{
-  typedef SkinningMapping<Rigid3Types, Vec3Types> SkinningMappingType;
-
-  vtkSmartPointer<vtkPoints>    points;
-  vtkSmartPointer<vtkPointData> pointData;
-
-  if(label != 0)
-    {
-    vtkSmartPointer<vtkThreshold> meshThreshold = vtkSmartPointer<vtkThreshold>::New();
-    meshThreshold->SetInput(polyMesh);
-    meshThreshold->ThresholdBetween(label,label);
-    meshThreshold->Update();
-
-    vtkUnstructuredGrid *mesh = meshThreshold->GetOutput();
-    points = mesh->GetPoints();
-    pointData   = mesh->GetPointData();
-    }
-  else
-    {
-    points = polyMesh->GetPoints();
-    pointData = polyMesh->GetPointData();
-    }
-
-  SkinningMappingType::SPtr boneSkinningMapping =
-    addNew<SkinningMappingType>(parentNode,"SkinningMapping");
-  if(boneSkinningMapping->isMechanical())
-    std::cout << "The map is mechanical." << std::endl;
-
-  boneSkinningMapping->setModels(articulatedFrame.get(),
-    mechanicalObject.get());
-
-  vtkIdType numberOfBones = armature->GetNumberOfCells();
-
-  sofa::helper::vector<SVector<SkinningMappingType::InReal> > weights;
-  sofa::helper::vector<SVector<unsigned int> >                indices;
-  sofa::helper::vector<unsigned int>                          nbIds;
-  sofa::helper::vector<float>                                 weightSum;
-
-  vtkIdType numberOfVertices = points->GetNumberOfPoints();
-  indices.resize(numberOfVertices);
-  weights.resize(numberOfVertices);
-  nbIds.resize(numberOfVertices,0);
-  weightSum.resize(numberOfVertices,0.);
-
-  vtkIntArray* materialIds = vtkIntArray::SafeDownCast(polyMesh->GetCellData()->GetArray("MaterialId"));
-  std::cout << "Material IDS: " << materialIds << std::endl;
-
-  vtkSmartPointer<vtkIdList> cellIdList =
-    vtkSmartPointer<vtkIdList>::New();
-  for(vtkIdType i = 0; i < numberOfBones; ++i)
-    {
-    vtkFloatArray *weightArray = vtkFloatArray::SafeDownCast(pointData->GetArray(i));
-    if( !weightArray || weightArray->GetNumberOfTuples() != numberOfVertices)
-      {
-      std::cerr << "Error extracting weight array." << std::endl;
-      continue;
-      }
-
-    for (vtkIdType j = 0; j < numberOfVertices; ++j)
-      {
-      polyMesh->GetPointCells(j, cellIdList);
-      bool hasWeight = false;
-      for(vtkIdType c = 0; c < cellIdList->GetNumberOfIds(); ++c)
-        {
-        if (materialIds->GetValue(cellIdList->GetId(c)) != 1)
-          {
-          hasWeight = true;
-          }
-        }
-      if (!hasWeight)
-        {
-        //continue;
-        }
-
-      float weight = weightArray->GetValue(j);
-      if (weight < 0.001)
-        {
-        continue;
-        }
-      weights[j].push_back(weight);
-      indices[j].push_back(i);
-      ++nbIds[j];
-      weightSum[j]+=weight;
-      }
-    }
-
-  // Make sure each vertex has at least one valid associated weight
-  // TODO: Normalize weights -> weights[i][*]/weightSum[i]
-  int weightErrorCount = 0;
-  for(size_t i = 0; i < weightSum.size(); ++i)
-    {
-    if(weightSum[i] == 0.)
-      {
-      //indices[i].push_back(0);
-      //weights[i].push_back(0.);
-
-      if (++weightErrorCount < 100)
-        {
-        std::cerr << "Error: Vertex " << i << " has no weight." << std::endl;
-        }
-      }
-    }
-  if (weightErrorCount)
-    {
-    std::cerr << "-> " << weightErrorCount << " voxels with no weight. " << std::endl;
-    }
-  boneSkinningMapping->setWeights(weights,indices,nbIds);
-
-}
-
-/// Create a map between mesh and armature (distance map)
-/// Using barycentric coordinates
-// ---------------------------------------------------------------------
-void mapArticulatedFrameToMesh(Node *                              parentNode,
-                               MechanicalObject<Rigid3Types>::SPtr articulatedFrame,
-                               MechanicalObject<Vec3Types>::SPtr   mechanicalObject
-                               )
-{
-  typedef BarycentricMapping<Vec3Types,Rigid3Types> BarycentricMappingType;
-  BarycentricMappingType::SPtr barycentricMapping =
-    addNew<BarycentricMappingType>(parentNode,"Mapping");
-  barycentricMapping->setModels(mechanicalObject.get(), articulatedFrame.get());
-}
-
-/// Sets the collision model
-// ---------------------------------------------------------------------
-Node::SPtr createCollisionNode(Node *parentNode, vtkPolyData * polyMesh,
-                               MechanicalObject<Vec3Types> *volumeMesh,
-                               int label = 0,
-                               bool createCollisionSurface = true
-                               )
-{
-  std::cout << "Creating collision node..." << std::endl;
-
-  std::vector<std::string> modelTypes;
-  modelTypes.push_back("Triangle");
-  modelTypes.push_back("Line");
-  modelTypes.push_back("Point");
-
-  //Node::SPtr collisionNode(parentNode, false);//
-  Node::SPtr collisionNode = parentNode;
-  // Create a new node for a collision model if a surface is given
-  if (createCollisionSurface)
-    {
-
-    if(!polyMesh)
-      {
-      std::cerr << "Warning! No valid surface given." << std::endl;
-      addCollisionModels(collisionNode,modelTypes);
-      return collisionNode;
-      }
-
-    collisionNode = parentNode->createChild("collisionNode");
-    // Load mesh
-    vtkPoints* points = 0;
-    vtkCellArray* triangles =0;
-    vtkSmartPointer<vtkThreshold> meshThreshold;
-    vtkSmartPointer<vtkTriangleFilter> extractTriangles;
-    if(label != 0)
-      {
-      meshThreshold = vtkSmartPointer<vtkThreshold>::New();
-      meshThreshold->SetInput(polyMesh);
-      meshThreshold->ThresholdBetween(label,label);
-      meshThreshold->Update();
-
-      vtkUnstructuredGrid *mesh = meshThreshold->GetOutput();
-      points    = mesh->GetPoints();
-      triangles = mesh->GetCells();
-      }
-    else
-      {
-      extractTriangles = vtkSmartPointer<vtkTriangleFilter>::New();
-      extractTriangles->SetInput(polyMesh);
-      extractTriangles->Update();
-
-      points    = extractTriangles->GetOutput()->GetPoints();
-      triangles = extractTriangles->GetOutput()->GetPolys();
-      }
-
-    std::stringstream meshName;
-    meshName << "SurfaceMesh" << label;
-
-    // Create mechanical object for the mesh vertices
-    MechanicalObject<Vec3Types>::SPtr surfaceMesh =
-      addNew<MechanicalObject<Vec3Types> >(collisionNode,meshName.str());
-
-    copyVertices(points,surfaceMesh.get());
-
-    // Topology
-    MeshTopology::SPtr meshTopology = addNew<MeshTopology>(collisionNode,
-      "SurfaceTopology");
-    meshTopology->seqPoints.setParent(&surfaceMesh->x);
-
-    // Copy tetrahedra array from vtk cell array
-    MeshTopology::SeqTriangles& triangleArray =
-      *meshTopology->seqTriangles.beginEdit();
-    triangleArray.reserve(triangles->GetNumberOfCells());
-
-    std::cout << "  Total # of triangles: " << triangles->GetNumberOfCells() <<
-      std::endl;
-
-    triangles->InitTraversal();
-    vtkIdType* element;
-    vtkIdType elementSize;
-
-    for(vtkIdType cellId = 0; triangles->GetNextCell(elementSize, element); ++cellId)
-      {
-      if(elementSize != 3)
-        {
-        std::cerr << " Error: Non-triangle encountered at cell "
-                  << cellId << "." << std::endl;
-        continue;
-        }
-      cellId++;
-      MeshTopology::Triangle t(element[0], element[1], element[2]);
-      triangleArray.push_back(t);
-      }
-
-    // Use a barycentric mapping to map surface to volume mesh
-    BarycentricMapping3_to_3::SPtr mechMapping =
-      addNew<BarycentricMapping3_to_3>(
-        collisionNode,"collisionMapping");
-    mechMapping->setModels(volumeMesh, surfaceMesh.get());
-    }
-  addCollisionModels(collisionNode,modelTypes);
-  //sofa::helper::vector< BaseNode* > parents = collisionNode->getParents();
-  //for (vtkIdType i=0; i < parents.size(); ++i)
-  //  {
-  //  std::cout << "Parent " << i << ": " << parents[i]->name.getValue() << std::endl;
-  //  }
-  std::cout << "done creating collision node." << std::endl;
-
-  return collisionNode;
-}
 
 void createEulerSolverNode(Node::SPtr         parentNode,
                            const std::string &scheme = "Explicit")
@@ -1758,12 +504,16 @@ int main(int argc, char* argv[])
 {
   PARSE_ARGS;
 
+  typedef itk::Vector<float,3> ImagePixelType;
+  typedef itk::Image<ImagePixelType,3> DisplacementFieldType;
+  typedef itk::ImageReader<DisplacementFieldType> DisplacementFieldReaderType;
+
   const double dt = 0.0001;
 
   sofa::simulation::setSimulation(new sofa::simulation::graph::DAGSimulation());
 
   // Create the scene graph root node
-  Node::SPtr root = createRootWithCollisionPipeline();
+  Node::SPtr root = getSimulation()->createNewGraph("root");
   root->setGravity( Coord3(0,0,0) );
   root->setDt(dt);
 
@@ -1778,10 +528,6 @@ int main(int argc, char* argv[])
     {
     std::cout<<"Mesh x,y coordinates will be inverted" << std::endl;
     }
-  if (!IsArmatureInRAS)
-    {
-    std::cout<<"Armature x,y coordinates will be inverted" << std::endl;
-    }
 
   if (Verbose)
     {
@@ -1789,36 +535,27 @@ int main(int argc, char* argv[])
     }
 
   // Read vtk data
-  vtkSmartPointer<vtkPolyData> armature;
-  armature.TakeReference(
-    bender::IOUtils::ReadPolyData(ArmaturePoly.c_str(),!IsArmatureInRAS));
+  vtkSmartPointer<vtkPolyData> fixedMesh;
+  fixedMesh.TakeReference(
+    bender::IOUtils::ReadPolyData(FixedImageMesh.c_str(),!IsMeshInRAS));
 
-  vtkSmartPointer<vtkPolyData> tetMesh;
-  tetMesh.TakeReference(
-    bender::IOUtils::ReadPolyData(InputTetMesh.c_str(),!IsMeshInRAS));
+  vtkSmartPointer<vtkPolyData> movingMesh;
+  movingMesh.TakeReference(
+    bender::IOUtils::ReadPolyData(MovingImageMesh.c_str(),!IsMeshInRAS));
 
-  vtkSmartPointer<vtkPolyData> surfaceMesh;
-  if (EnableCollision)
-    {
-    surfaceMesh.TakeReference(
-      bender::IOUtils::ReadPolyData(InputSurface.c_str(),!IsMeshInRAS));
-    }
+  DisplacementFieldType::Pointer displacementField;
+  DisplacementFieldReaderType::Pointer reader = DisplacementFieldReaderType::New();
+  reader->SetFileName(DisplacementField.c_str());
+  reader->Update();
+  displacementField = reader->GetOutput();
 
   // Create a scene node
-  Node::SPtr sceneNode = root->createChild("BenderSimulation");
+  Node::SPtr sceneNode = root->createChild("FEMSimulation");
 
   // Time stepper for the armature
   createEulerSolverNode(root.get(),"Implicit");
 
-  if (Verbose)
-    {
-    std::cout << "************************************************************"
-              << std::endl;
-    std::cout << "Create anatomical map..." << std::endl;
-    }
-
-  // Create a constrained articulated frame
-  Node::SPtr skeletalNode = sceneNode->createChild("Skeleton");
+  Node::SPtr ghostDOFNode = root->createChild("BoundaryCondition");
 
   if (Verbose)
     {
@@ -1832,35 +569,22 @@ int main(int argc, char* argv[])
   // recomputed at each step.
   const double firstFrame = (GUI ? 1. : 1. / NumberOfArmatureSteps);
   Vector6 box;
-  MechanicalObject<Vec3Types>::SPtr ghostMesh =
-    createGhostMesh(skeletalNode.get(), armature, tetMesh,box,
-                    !IsArmatureInRAS, firstFrame );
-
-  // Crete a fix contraint to fix the positions of the posed ghost frame
-  BoxROI<Vec3Types>::SPtr boxRoi = addNew<BoxROI<Vec3Types> >(skeletalNode.get(),"BoxRoi");
-  sofa::helper::vector<Vector6> &boxes = *boxRoi->boxes.beginEdit();
-  boxes.push_back(box);
-  boxRoi->boxes.endEdit();
-
-  FixedConstraint<Vec3Types>::SPtr fixedConstraint =
-    addNew<FixedConstraint<Vec3Types> >(skeletalNode.get(),"fixedContraint");
-  fixedConstraint->f_indices.setParent(&boxRoi->f_indices);
+  MechanicalObject<Vec3Types>::SPtr ghostDOF =
+  createGhostPoints(ghostDOFNode.get(), displacementField, movingMesh );
 
   if (Verbose)
     {
     std::cout << "************************************************************"
               << std::endl;
-    std::cout << "Create Anatomical mesh..." << std::endl;
+    std::cout << "Create Skull mesh..." << std::endl;
     }
 
   // Node for the mesh
-  Node::SPtr anatomicalNode = sceneNode->createChild("AnatomicalMesh");
+  Node::SPtr skullDOFNode = sceneNode->createChild("SkullMesh");
 
   // Create mesh dof
-  Vec3Types::VecReal                youngModulus;
-  MechanicalObject<Vec3Types>::SPtr posedMesh = loadMesh(
-    anatomicalNode.get(), tetMesh, youngModulus);
-  UniformMass3::SPtr anatomicalMass = addNew<UniformMass3>(anatomicalNode.get(),"Mass");
+  MechanicalObject<Vec3Types>::SPtr skullDOF = loadMesh(skullDOFNode.get(), fixedMesh);
+  UniformMass3::SPtr anatomicalMass = addNew<UniformMass3>(skullDOFNode.get(),"Mass");
   anatomicalMass->setTotalMass(100);
 
   if (Verbose)
@@ -1871,21 +595,7 @@ int main(int argc, char* argv[])
     }
 
   // Finite element method
-  createFiniteElementModel(anatomicalNode.get(), LinearFEM, youngModulus);
-
-  // Collision node
-  if (EnableCollision)
-    {
-    if (Verbose)
-      {
-      std::cout << "************************************************************"
-                << std::endl;
-      std::cout << "Create collision node..." << std::endl;
-      }
-    Node::SPtr collisionNode;
-    collisionNode = createCollisionNode(anatomicalNode.get(),
-                                        surfaceMesh,posedMesh.get());
-    }
+  createFiniteElementModel(skullDOFNode.get(), LinearFEM, youngModulus, poissonRatio);
 
   if (Verbose)
     {
@@ -1896,23 +606,23 @@ int main(int argc, char* argv[])
   using sofa::component::interactionforcefield::StiffSpringForceField;
 
   StiffSpringForceField<Vec3Types>::SPtr stiffspringforcefield =
-    sofa::core::objectmodel::New<StiffSpringForceField<Vec3Types> >(ghostMesh.get(),posedMesh.get());
-  stiffspringforcefield->setName("Spring-Contact");
-  anatomicalNode->addObject(stiffspringforcefield);
+  sofa::core::objectmodel::New<StiffSpringForceField<Vec3Types> >(ghostDOF.get(),skullDOF.get());
+  stiffspringforcefield->setName("Force Loads");
+  skullDOFNode->addObject(stiffspringforcefield);
 
   double stiffness = 10000.;
   double distance = 1.;
-  const vtkIdType numberOfPoints = tetMesh->GetPoints()->GetNumberOfPoints();
+  const vtkIdType numberOfPoints = fixedMesh->GetPoints()->GetNumberOfPoints();
   size_t sample = 0;
   for (vtkIdType pointId = 0; pointId < numberOfPoints; ++pointId)
     {
-    if (isPointInLabel(tetMesh, BoneLabel, pointId) && !(sample++ % 1))
+    if (!(sample++ % 1))
       {
       stiffspringforcefield->addSpring(pointId, pointId, stiffness, 0.0, distance);
       }
     }
 
-  const sofa::core::objectmodel::TagSet &tags = posedMesh->getTags();
+  const sofa::core::objectmodel::TagSet &tags = skullDOF->getTags();
   for (sofa::core::objectmodel::TagSet::const_iterator it=tags.begin(); it!=tags.end(); ++it)
     stiffspringforcefield->addTag(*it);
 
@@ -1986,13 +696,7 @@ int main(int argc, char* argv[])
       sofa::simulation::getSimulation()->animate(root.get(), dt);
       //sofa::simulation::getSimulation()->animate(root.get());
 
-      if (step < NumberOfArmatureSteps)
-        {
-        poseMechanicalObject(ghostMesh, tetMesh, armature, !IsArmatureInRAS,
-                             static_cast<double>(step + 2 )/ NumberOfArmatureSteps);
-        }
-
-      const double error = meanSquareError(ghostMesh, posedMesh);
+      const double error = meanSquareError(ghostDOF, skullDOF);
       double mean = (lastError + error) / 2.;
       stdDeviation = sqrt((pow(lastError - mean, 2) + pow(error - mean, 2)) / 2.);
       //errorChange =  fabs(lastError-error) / lastError;
@@ -2006,7 +710,7 @@ int main(int argc, char* argv[])
       }
     }
   vtkNew<vtkPolyData> posedSurface;
-  initMesh(posedSurface.GetPointer(), tetMesh, anatomicalNode);
+  initMesh(posedSurface.GetPointer(), fixedMesh, skullDOFNode);
   if (!IsMeshInRAS)
     {
     vtkNew<vtkTransform> transform;

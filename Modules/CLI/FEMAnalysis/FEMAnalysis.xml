@@ -2,43 +2,43 @@
 <executable>
   <category>Dynamics</category>
   <index>5</index>
-  <title>Simulate Pose</title>
-  <description><![CDATA[Pose a <b>Mesh</b> SOFA's finite element library.]]></description>
+  <title>FEM Analysis</title>
+  <description><![CDATA[Finite element analysis module using SOFA.]]></description>
   <version>2.0.0</version>
-  <documentation-url>http://public.kitware.com/Wiki/Bender/Documentation/2.0/Modules/SimulatePose</documentation-url>
+  <documentation-url></documentation-url>
   <license/>
-  <contributor>Ricardo Ortiz (Kitware), Julien Finet (Kitware)</contributor>
-  <acknowledgements><![CDATA[This work is supported by Air Force Research Laboratory (AFRL)]]></acknowledgements>
+  <contributor>Ricardo Ortiz (Kitware)</contributor>
+  <acknowledgements><![CDATA[This work is supported by NIH Grant]]></acknowledgements>
   <parameters>
     <label>IO</label>
     <description><![CDATA[Input/output parameters]]></description>
     <geometry fileExtensions=".vtk">
-      <name>InputTetMesh</name>
-      <label>Volumetric mesh</label>
-      <description><![CDATA[Input volumetric mesh to be posed.]]></description>
+      <name>FixedImageMesh</name>
+      <label>Fixed Image Mesh</label>
+      <description><![CDATA[Input volumetric mesh of the fixed image.]]></description>
       <channel>input</channel>
       <index>0</index>
     </geometry>
     <geometry fileExtensions=".vtk">
-      <name>ArmaturePoly</name>
-      <label>Armature</label>
-      <description><![CDATA[Armature model containing the bone poses. The armature must 'fit' inside <b>Surface</b>.]]></description>
+      <name>MovingImageMesh</name>
+      <label>Fixed Image Mesh</label>
+      <description><![CDATA[Input volumetric mesh of the moving image.]]></description>
       <channel>input</channel>
       <index>1</index>
     </geometry>
 
-    <geometry fileExtensions=".vtk">
-      <name>InputSurface</name>
-      <label>Surface mesh</label>
-      <description><![CDATA[Input surface mesh used for collision detection and response.]]></description>
+    <image type="vector">
+      <name>DisplacementField</name>
+      <label>Displacement Field</label>
+      <description><![CDATA[Input displacement field from fixed to moving image.]]></description>
       <channel>input</channel>
       <index>2</index>
-    </geometry>
+    </image>
 
     <geometry fileExtensions=".vtk">
       <name>OutputTetMesh</name>
-      <label>Output posed mesh</label>
-      <description><![CDATA[Output volumetric mesh posed by the <b>Armature</b> transforms.]]></description>
+      <label>Output computed mesh</label>
+      <description><![CDATA[Output computed mesh in the simulator.]]></description>
       <channel>output</channel>
       <index>3</index>
     </geometry>
@@ -53,20 +53,20 @@
       <description><![CDATA[Use linear FEM. This speeds up the initialization step.]]></description>
       <default>true</default>
     </boolean>
-    <boolean>
-      <name>EnableCollision</name>
-      <label>Collision</label>
-      <longflag>--collision</longflag>
-      <description><![CDATA[Enable/Disable collision detection. This slows the process time by multiple order of magnitudes.]]></description>
-      <default>false</default>
-    </boolean>
-    <integer>
-      <name>BoneLabel</name>
-      <label>Bone label</label>
-      <longflag>--bone</longflag>
-      <description><![CDATA[Label of the bone.]]></description>
-      <default>2</default>
-    </integer>
+    <scalar>
+      <name>youngModulus</name>
+      <label>Young Modulus</label>
+      <longflag>--youngModulus</longflag>
+      <description><![CDATA[An uniform Young modulus parameter.]]></description>
+      <default>100000</default>
+    </scalar>
+    <scalar>
+      <name>poissonRatio</name>
+      <label>Poisson Ratio</label>
+      <longflag>--poissonRatio</longflag>
+      <description><![CDATA[An uniform Poisson ratio parameter.]]></description>
+      <default>100000</default>
+    </scalar>
   </parameters>
   <parameters>
     <label>Animation</label>
@@ -78,18 +78,6 @@
       <description><![CDATA[Show SOFA gui.]]></description>
       <default>false</default>
     </boolean>
-    <integer>
-      <name>NumberOfArmatureSteps</name>
-      <label>Number of armature steps</label>
-      <longflag>--armatureSteps</longflag>
-      <description><![CDATA[Number of steps to apply the armature poses.]]></description>
-      <default>100</default>
-      <constraints>
-        <minimum>1</minimum>
-        <maximum>1000</maximum>
-        <step>1</step>
-      </constraints>
-    </integer>
     <integer>
       <name>MaximumNumberOfSimulationSteps</name>
       <label>Maximum number of steps</label>
@@ -115,14 +103,6 @@
     <description><![CDATA[Advanced properties]]></description>
 
     <boolean>
-      <name>IsArmatureInRAS</name>
-      <label>Armature in RAS</label>
-      <description><![CDATA[Whether input armature is already in the RAS(Right, Anterior, Superior) coordinate system (true) or in LPS (Left, Posterior, Superior) coordinate system (false, default). If not, it will be internally transformed into RAS.]]></description>
-      <longflag>--armatureInRAS</longflag>
-      <default>false</default>
-    </boolean>
-
-    <boolean>
       <name>IsMeshInRAS</name>
       <label>Meshes in RAS</label>
       <description><![CDATA[Whether the input meshes are already in the RAS(Right, Anterior, Superior) coordinate system (true) or in LPS (Left, Posterior, Superior) coordinate system (false, default). If not, it will be be internally transformed into RAS.]]></description>
@@ -137,6 +117,7 @@
       <description><![CDATA[Print verbose outputs.]]></description>
       <default>false</default>
     </boolean>
+
     <boolean>
       <name>Debug</name>
       <label>Debug</label>

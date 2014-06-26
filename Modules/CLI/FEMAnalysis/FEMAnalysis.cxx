@@ -127,7 +127,7 @@ public:
 
 protected:
   CommandIterationUpdate() {};
-
+  static int iteration;
 public:
 
   typedef itk::LevenbergMarquardtOptimizer     OptimizerType;
@@ -148,14 +148,16 @@ public:
       return;
     }
 
-    std::cout << "Value = " << optimizer->GetCachedValue() << std::endl;
+//     std::cout << "Value = " << optimizer->GetCachedValue() << std::endl;
     std::cout << "Position = "  << optimizer->GetCachedCurrentPosition();
+    std::cout << "Iteration = " << ++iteration << std::endl;
     std::cout << std::endl << std::endl;
 
   }
 
 };
 
+int CommandIterationUpdate::iteration = 0;
 /// helper function for more compact component creation
 // ---------------------------------------------------------------------
 template<class Component>
@@ -497,16 +499,7 @@ void initMesh(vtkPolyData* outputPolyData, Node::SPtr anatomicalMesh)
     forceVectors->SetTupleValue(i,f);
   }
 
-
-
-//   for (int i = 0; i < inputPolyData->GetPointData()->GetNumberOfArrays(); ++i)
-//     {
-//     outputPolyData->GetPointData()->AddArray(inputPolyData->GetPointData()->GetArray(i));
-//     }
-//   for (int i = 0; i < inputPolyData->GetCellData()->GetNumberOfArrays(); ++i)
-//     {
-//     outputPolyData->GetCellData()->AddArray(inputPolyData->GetCellData()->GetArray(i));
-//     }
+  outputPolyData->GetPointData()->AddArray(forceVectors.GetPointer());
 
 }
 
@@ -550,7 +543,13 @@ double meanSquareError(MechanicalObject<Vec3Types>::SPtr mesh1,
 }
 
 itk::TranslationTransform< double,3>::Pointer
-registerMeshes(itk::PointSet<float,3> *fixedMesh, itk::PointSet<float,3> *movingMesh, bool Verbose = false)
+registerMeshes(itk::PointSet<float,3> *fixedMesh, 
+               itk::PointSet<float,3> *movingMesh, 
+               const int &numberOfIterations, 
+               const double &gradientTolerance, 
+               const double &valueTolerance, 
+               const double &epsilonFunction, 
+               bool Verbose = false)
 {
   typedef itk::PointSet<float,3> PointSetType;
   if (Verbose)
@@ -581,25 +580,26 @@ registerMeshes(itk::PointSet<float,3> *fixedMesh, itk::PointSet<float,3> *moving
   //-----------------------------------------------------------
   typedef itk::TranslationTransform< double, 3> TransformType;
   TransformType::Pointer transform = TransformType::New();
+  
   // Optimizer Type
   typedef itk::LevenbergMarquardtOptimizer OptimizerType;
   OptimizerType::Pointer optimizer = OptimizerType::New();
   optimizer->SetUseCostFunctionGradient(false);
+  
   // Registration Method
   typedef itk::PointSetToPointSetRegistrationMethod<PointSetType,PointSetType> RegistrationType;
   RegistrationType::Pointer   registration  = RegistrationType::New();
+  
   // Scale the translation components of the Transform in the Optimizer
   OptimizerType::ScalesType scales( transform->GetNumberOfParameters() );
   scales.Fill( 0.01 );
-  const unsigned long numberOfIterations =  100;
-  const double        gradientTolerance  =  1e-5;    // convergence criterion
-  const double        valueTolerance     =  1e-5;    // convergence criterion
-  const double        epsilonFunction    =  1e-6;   // convergence criterion
+
   optimizer->SetScales( scales );
   optimizer->SetNumberOfIterations( numberOfIterations );
   optimizer->SetValueTolerance( valueTolerance );
   optimizer->SetGradientTolerance( gradientTolerance );
   optimizer->SetEpsilonFunction( epsilonFunction );
+  
   // Start from an Identity transform (in a normal case, the user
   // can probably provide a better guess than the identity...
   transform->SetIdentity();
@@ -651,22 +651,27 @@ registerMeshes(itk::PointSet<float,3> *fixedMesh, itk::PointSet<float,3> *moving
   // Connect an observer
   CommandIterationUpdate::Pointer observer = CommandIterationUpdate::New();
   optimizer->AddObserver( itk::IterationEvent(), observer );
-  try
-  {
-
-    if (Verbose)
+  if (Verbose)
     {
       std::cout << "************************************************************"
       << std::endl;
       std::cout << "registerMeshes(): Execute registration..." << std::endl;
     }
+  try
+  {
     registration->Update();
   }
   catch( itk::ExceptionObject & e )
   {
     std::cout << e << std::endl;
   }
-  std::cout << "Solution = " << transform->GetParameters() << std::endl;
+  
+  if (Verbose)
+    {
+      std::cout << "************************************************************"
+      << std::endl;
+      std::cout << "registerMeshes(): Finished registration..." << std::endl;
+    }
   return transform;
 }
 
@@ -734,7 +739,10 @@ int main(int argc, char* argv[])
     << std::endl;
     std::cout << "Register meshes using ICP..." << std::endl;
   }
-  itk::TranslationTransform< double,3>::Pointer transform = registerMeshes(fixedMesh.GetPointer(),movingMesh.GetPointer(),Verbose);
+  itk::TranslationTransform< double,3>::Pointer transform = 
+  registerMeshes(fixedMesh.GetPointer(),movingMesh.GetPointer(),
+                 Iterations,GradientTolerance,ValueTolerance,
+                 epsilonFunction,Verbose);
 
   // Create a scene node
   Node::SPtr sceneNode = root->createChild("FEMSimulation");
@@ -784,7 +792,7 @@ int main(int argc, char* argv[])
     {
     std::cout << "************************************************************"
               << std::endl;
-    std::cout << "Create spring forces..." << std::endl;
+    std::cout << "Create force loads..." << std::endl;
     }
   using sofa::component::interactionforcefield::StiffSpringForceField;
 

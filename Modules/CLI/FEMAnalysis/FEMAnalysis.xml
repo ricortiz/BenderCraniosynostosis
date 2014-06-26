@@ -119,4 +119,41 @@
     </boolean>
 
   </parameters>
+  <parameters advanced="true">
+    <label>Iterative Closest Point</label>
+    <description><![CDATA[ICP properties]]></description>
+
+    <integer>
+      <name>Iterations</name>
+      <label>Number of iterations</label>
+      <description><![CDATA[Total number of iterations.]]></description>
+      <longflag>--icpIterations</longflag>
+      <default>100</default>
+    </integer>
+
+    <double>
+      <name>GradientTolerance</name>
+      <label>Gradient Tolerance</label>
+      <longflag>--gradientTolerance</longflag>
+      <description><![CDATA[Convergence criterion.]]></description>
+      <default>1e-5</default>
+    </double>
+
+    <double>
+      <name>ValueTolerance</name>
+      <label>Value Tolerance</label>
+      <longflag>--valueTolerance</longflag>
+      <description><![CDATA[Convergence criterion.]]></description>
+      <default>1e-5</default>
+    </double>
+
+    <double>
+      <name>epsilonFunction</name>
+      <label>epsilonFunction</label>
+      <longflag>--epsilonFunction</longflag>
+      <description><![CDATA[Convergence criterion.]]></description>
+      <default>1e-6</default>
+    </double>
+
+  </parameters>
 </executable>

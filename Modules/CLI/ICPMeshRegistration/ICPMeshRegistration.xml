@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="utf-8"?>
+<executable>
+  <category>Registration</category>
+  <index>5</index>
+  <title>ICP Mesh Registration</title>
+  <description><![CDATA[Iteration closest point registration of two meshes, returns transform.]]></description>
+  <version>2.0.0</version>
+  <documentation-url></documentation-url>
+  <license/>
+  <contributor>Ricardo Ortiz (Kitware)</contributor>
+  <acknowledgements><![CDATA[This work is supported by NIH Grant...]]></acknowledgements>
+  <parameters>
+    <label>IO</label>
+    <description><![CDATA[Input/output parameters]]></description>
+    <geometry fileExtensions=".vtk">
+      <name>FixedImageMesh</name>
+      <label>Fixed Image Mesh</label>
+      <description><![CDATA[Input volumetric mesh of the fixed image.]]></description>
+      <channel>input</channel>
+      <index>0</index>
+    </geometry>
+
+    <geometry fileExtensions=".vtk">
+      <name>MovingImageMesh</name>
+      <label>Fixed Image Mesh</label>
+      <description><![CDATA[Input volumetric mesh of the moving image.]]></description>
+      <channel>input</channel>
+      <index>1</index>
+    </geometry>
+
+    <transform fileExtensions=".txt">
+      <name>OutputTransform</name>
+      <label>Output computed transform</label>
+      <description><![CDATA[Output computed transform from the registration process.]]></description>
+      <channel>output</channel>
+      <index>2</index>
+    </transform>
+  </parameters>
+  <parameters>
+    <label>Parameters</label>
+    <description><![CDATA[ICP properties]]></description>
+
+    <integer>
+      <name>Iterations</name>
+      <label>Number of iterations</label>
+      <description><![CDATA[Total number of iterations.]]></description>
+      <longflag>--icpIterations</longflag>
+      <default>100</default>
+    </integer>
+
+    <double>
+      <name>GradientTolerance</name>
+      <label>Gradient Tolerance</label>
+      <longflag>--gradientTolerance</longflag>
+      <description><![CDATA[Convergence criterion.]]></description>
+      <default>0.00001</default>
+    </double>
+
+    <double>
+      <name>ValueTolerance</name>
+      <label>Value Tolerance</label>
+      <longflag>--valueTolerance</longflag>
+      <description><![CDATA[Convergence criterion.]]></description>
+      <default>0.00001</default>
+    </double>
+
+    <double>
+      <name>epsilonFunction</name>
+      <label>epsilonFunction</label>
+      <longflag>--epsilonFunction</longflag>
+      <description><![CDATA[Convergence criterion.]]></description>
+      <default>0.000001</default>
+    </double>
+
+  </parameters>
+
+    <parameters advanced="true">
+    <label>Advanced</label>
+    <description><![CDATA[Advanced properties]]></description>
+
+    <boolean>
+      <name>Verbose</name>
+      <label>Verbose</label>
+      <longflag>--verbose</longflag>
+      <description><![CDATA[Print verbose outputs.]]></description>
+      <default>false</default>
+    </boolean>
+
+    <boolean>
+      <name>Debug</name>
+      <label>Debug</label>
+      <longflag>--debug</longflag>
+      <description><![CDATA[Generate debug information (e.g sofa scene).]]></description>
+      <default>false</default>
+    </boolean>
+
+  </parameters>
+</executable>

@@ -33,6 +33,7 @@ set(modules
   VolumeMaterialExtractor
   VotingResample
   FEMAnalysis
+  ICPMeshRegistration
   )
 
 set(Bender_MODULES)

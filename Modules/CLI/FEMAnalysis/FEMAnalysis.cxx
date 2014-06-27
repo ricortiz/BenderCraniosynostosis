@@ -21,6 +21,7 @@
 // Bender includes
 #include "FEMAnalysisCLP.h"
 #include "benderIOUtils.h"
+#include "itkVTKTetrahedralMeshReader.h"
 
 // OpenGL includes
 //#include <GL/glew.h>
@@ -67,7 +68,6 @@
 #include <itkTetrahedronCell.h>
 #include <itkVector.h>
 #include <itkVectorLinearInterpolateImageFunction.h>
-#include <itkVTKTetrahedralMeshReader.h>
 #include <itkTranslationTransform.h>
 #include <itkEuclideanDistancePointMetric.h>
 #include <itkLevenbergMarquardtOptimizer.h>
@@ -103,7 +103,6 @@
 // ---------------------------------------------------------------------
 // ---
 // ---------------------------------------------------------------------
-using namespace sofa::component::collision;
 using namespace sofa::component::container;
 using namespace sofa::component::engine;
 using namespace sofa::component::forcefield;
@@ -149,7 +148,7 @@ public:
     }
 
 //     std::cout << "Value = " << optimizer->GetCachedValue() << std::endl;
-    std::cout << "Position = "  << optimizer->GetCachedCurrentPosition();
+    std::cout << "Position = "  << optimizer->GetCachedCurrentPosition() << std::endl;
     std::cout << "Iteration = " << ++iteration << std::endl;
     std::cout << std::endl << std::endl;
 
@@ -543,12 +542,12 @@ double meanSquareError(MechanicalObject<Vec3Types>::SPtr mesh1,
 }
 
 itk::TranslationTransform< double,3>::Pointer
-registerMeshes(itk::PointSet<float,3> *fixedMesh, 
-               itk::PointSet<float,3> *movingMesh, 
-               const int &numberOfIterations, 
-               const double &gradientTolerance, 
-               const double &valueTolerance, 
-               const double &epsilonFunction, 
+registerMeshes(itk::PointSet<float,3> *fixedMesh,
+               itk::PointSet<float,3> *movingMesh,
+               const int &numberOfIterations,
+               const double &gradientTolerance,
+               const double &valueTolerance,
+               const double &epsilonFunction,
                bool Verbose = false)
 {
   typedef itk::PointSet<float,3> PointSetType;
@@ -580,16 +579,16 @@ registerMeshes(itk::PointSet<float,3> *fixedMesh,
   //-----------------------------------------------------------
   typedef itk::TranslationTransform< double, 3> TransformType;
   TransformType::Pointer transform = TransformType::New();
-  
+
   // Optimizer Type
   typedef itk::LevenbergMarquardtOptimizer OptimizerType;
   OptimizerType::Pointer optimizer = OptimizerType::New();
   optimizer->SetUseCostFunctionGradient(false);
-  
+
   // Registration Method
   typedef itk::PointSetToPointSetRegistrationMethod<PointSetType,PointSetType> RegistrationType;
   RegistrationType::Pointer   registration  = RegistrationType::New();
-  
+
   // Scale the translation components of the Transform in the Optimizer
   OptimizerType::ScalesType scales( transform->GetNumberOfParameters() );
   scales.Fill( 0.01 );
@@ -599,7 +598,7 @@ registerMeshes(itk::PointSet<float,3> *fixedMesh,
   optimizer->SetValueTolerance( valueTolerance );
   optimizer->SetGradientTolerance( gradientTolerance );
   optimizer->SetEpsilonFunction( epsilonFunction );
-  
+
   // Start from an Identity transform (in a normal case, the user
   // can probably provide a better guess than the identity...
   transform->SetIdentity();
@@ -665,7 +664,7 @@ registerMeshes(itk::PointSet<float,3> *fixedMesh,
   {
     std::cout << e << std::endl;
   }
-  
+
   if (Verbose)
     {
       std::cout << "************************************************************"
@@ -739,7 +738,7 @@ int main(int argc, char* argv[])
     << std::endl;
     std::cout << "Register meshes using ICP..." << std::endl;
   }
-  itk::TranslationTransform< double,3>::Pointer transform = 
+  itk::TranslationTransform< double,3>::Pointer transform =
   registerMeshes(fixedMesh.GetPointer(),movingMesh.GetPointer(),
                  Iterations,GradientTolerance,ValueTolerance,
                  epsilonFunction,Verbose);

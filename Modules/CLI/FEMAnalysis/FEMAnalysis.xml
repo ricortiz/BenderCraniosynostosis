@@ -136,7 +136,7 @@
       <label>Gradient Tolerance</label>
       <longflag>--gradientTolerance</longflag>
       <description><![CDATA[Convergence criterion.]]></description>
-      <default>1e-5</default>
+      <default>0.00001</default>
     </double>
 
     <double>
@@ -144,7 +144,7 @@
       <label>Value Tolerance</label>
       <longflag>--valueTolerance</longflag>
       <description><![CDATA[Convergence criterion.]]></description>
-      <default>1e-5</default>
+      <default>0.00001</default>
     </double>
 
     <double>
@@ -152,7 +152,7 @@
       <label>epsilonFunction</label>
       <longflag>--epsilonFunction</longflag>
       <description><![CDATA[Convergence criterion.]]></description>
-      <default>1e-6</default>
+      <default>0.000001</default>
     </double>
 
   </parameters>

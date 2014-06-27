@@ -261,7 +261,7 @@ Node::SPtr createVisualNode(Node *                        parentNode,
 // ---------------------------------------------------------------------
 MechanicalObject<Vec3Types>::SPtr createGhostPoints(
   Node *       parentNode,
-  itk::TranslationTransform< double,3>* transform,
+//   itk::TranslationTransform< double,3>* transform,
   itk::Mesh<float,3> *mesh
   )
 {
@@ -272,13 +272,13 @@ MechanicalObject<Vec3Types>::SPtr createGhostPoints(
     addNew<MechanicalObject<Vec3Types> >(parentNode, "ghostDOF");
 
   // Get positions
-  size_t numberOfPoints = mesh->GetNumberOfPoints();
+  size_t numberOfPoints = 1;//mesh->GetNumberOfPoints();
   std::cout << "Number of points: " << numberOfPoints << std::endl;
 
   // Traverse mesh nodes
-  PointsContainer *points = mesh->GetPoints();
-  itk::TranslationTransform< double,3>::InputPointType  fixedPoint;
-  itk::TranslationTransform< double,3>::OutputPointType movingPoint;
+//   PointsContainer *points = mesh->GetPoints();
+//   itk::TranslationTransform< double,3>::InputPointType  fixedPoint;
+//   itk::TranslationTransform< double,3>::OutputPointType movingPoint;
 
   ghostDOF->resize(numberOfPoints);
   Data<MechanicalObject<Vec3Types>::VecCoord> *x =
@@ -287,13 +287,15 @@ MechanicalObject<Vec3Types>::SPtr createGhostPoints(
   MechanicalObject<Vec3Types>::VecCoord &vertices = *x->beginEdit();
   for(size_t i = 0; i < numberOfPoints; ++i)
     {
-    fixedPoint = points->GetElement(i);
-  movingPoint = transform->TransformPoint(fixedPoint);
+//     fixedPoint = points->GetElement(i);
+//   movingPoint = transform->TransformPoint(fixedPoint);
 
-    vertices[i][0] = fixedPoint[0] + movingPoint[0];
-    vertices[i][1] = fixedPoint[1] + movingPoint[1];
-    vertices[i][2] = fixedPoint[2] + movingPoint[2];
-
+//     vertices[i][0] = fixedPoint[0] + movingPoint[0];
+//     vertices[i][1] = fixedPoint[1] + movingPoint[1];
+//     vertices[i][2] = fixedPoint[2] + movingPoint[2];
+    vertices[i][0] = 0.;
+    vertices[i][1] = 0.;
+    vertices[i][2] = 0.;
     }
   x->endEdit();
 
@@ -309,10 +311,18 @@ MechanicalObject<Vec3Types>::SPtr createGhostPoints(
 // ---------------------------------------------------------------------
 void createFiniteElementModel(Node* parentNode, bool linearFEM,
                               const Vec3Types::Real &youngModulus,
-                              const Vec3Types::Real &poissonRatio  )
+                              const Vec3Types::Real &poissonRatio,
+                              bool verbose = false
+                             )
 {
   if (linearFEM)
     {
+    if (verbose)
+    {
+    std::cout << "************************************************************"
+            << std::endl;
+    std::cout << "Create linear FEM..." << std::endl;
+    }
     TetrahedronFEMForceField< Vec3Types >::SPtr femSolver =
       addNew<TetrahedronFEMForceField< Vec3Types > >(parentNode,"femSolver");
     femSolver->setComputeGlobalMatrix(false);
@@ -321,7 +331,12 @@ void createFiniteElementModel(Node* parentNode, bool linearFEM,
     femSolver->setYoungModulus(youngModulus);
     return;
     }
-
+    if (verbose)
+    {
+    std::cout << "************************************************************"
+            << std::endl;
+    std::cout << "Create non-linear FEM..." << std::endl;
+    }
   Node::SPtr behavior = parentNode->createChild("behavior");
   MechanicalObject<Vec3Types> *tetMesh =
     dynamic_cast<MechanicalObject<Vec3Types>*>( parentNode->getMechanicalState());
@@ -481,11 +496,13 @@ void initMesh(vtkPolyData* outputPolyData, Node::SPtr anatomicalMesh)
     cells->InsertNextCell(4, cell);
     }
   outputPolyData->SetPolys(cells.GetPointer());
+  
+  const VecDeriv3 &forces = *dof->getF();
 
   vtkNew<vtkFloatArray> forceVectors;
   forceVectors->SetNumberOfComponents(3);
-
-  const VecDeriv3 &forces = *dof->getF();
+  forceVectors->SetName("Forces");
+      
   forceVectors->SetNumberOfTuples(forces.size());
 
   for(size_t i = 0, end = forces.size(); i< end; ++i)
@@ -738,10 +755,10 @@ int main(int argc, char* argv[])
     << std::endl;
     std::cout << "Register meshes using ICP..." << std::endl;
   }
-  itk::TranslationTransform< double,3>::Pointer transform =
-  registerMeshes(fixedMesh.GetPointer(),movingMesh.GetPointer(),
-                 Iterations,GradientTolerance,ValueTolerance,
-                 epsilonFunction,Verbose);
+//   itk::TranslationTransform< double,3>::Pointer transform =
+//   registerMeshes(fixedMesh.GetPointer(),movingMesh.GetPointer(),
+//                  Iterations,GradientTolerance,ValueTolerance,
+//                  epsilonFunction,Verbose);
 
   // Create a scene node
   Node::SPtr sceneNode = root->createChild("FEMSimulation");
@@ -758,9 +775,9 @@ int main(int argc, char* argv[])
     std::cout << "Create ghost mesh..." << std::endl;
     }
 
-  Vector6 box;
+  
   MechanicalObject<Vec3Types>::SPtr ghostDOF =
-  createGhostPoints(ghostDOFNode.get(), transform, movingMesh );
+  createGhostPoints(ghostDOFNode.get(),/* transform,*/ movingMesh );
 
   if (Verbose)
     {
@@ -776,6 +793,24 @@ int main(int argc, char* argv[])
   MechanicalObject<Vec3Types>::SPtr skullDOF = loadMesh(skullDOFNode.get(), fixedMesh);
   UniformMass3::SPtr anatomicalMass = addNew<UniformMass3>(skullDOFNode.get(),"Mass");
   anatomicalMass->setTotalMass(100);
+  
+  Vector6 box;
+  box[0] = -135.0;
+  box[1] = -140.0;
+  box[2] = 0;
+  box[3] = -60;
+  box[4] = -40;
+  box[5] = 20;
+  
+  // Crete a fix contraint to fix the positions of the posed ghost frame
+  BoxROI<Vec3Types>::SPtr boxRoi = addNew<BoxROI<Vec3Types> >(skullDOFNode.get(),"BoxRoi");
+  sofa::helper::vector<Vector6> &boxes = *boxRoi->boxes.beginEdit();
+  boxes.push_back(box);
+  boxRoi->boxes.endEdit();
+
+  FixedConstraint<Vec3Types>::SPtr fixedConstraint =
+    addNew<FixedConstraint<Vec3Types> >(skullDOFNode.get(),"fixedContraint");
+  fixedConstraint->f_indices.setParent(&boxRoi->f_indices);
 
   if (Verbose)
     {
@@ -785,7 +820,7 @@ int main(int argc, char* argv[])
     }
 
   // Finite element method
-  createFiniteElementModel(skullDOFNode.get(), LinearFEM, youngModulus, poissonRatio);
+  createFiniteElementModel(skullDOFNode.get(), true, youngModulus, poissonRatio, Verbose);
 
   if (Verbose)
     {
@@ -800,9 +835,9 @@ int main(int argc, char* argv[])
   stiffspringforcefield->setName("Force Loads");
   skullDOFNode->addObject(stiffspringforcefield);
 
-  double stiffness = 10000.;
+  double stiffness = 100000.;
   double distance = 1.;
-  const vtkIdType numberOfPoints = fixedMesh->GetPoints()->Size();
+  const vtkIdType numberOfPoints = 1;//fixedMesh->GetPoints()->Size();
   size_t sample = 0;
   for (vtkIdType pointId = 0; pointId < numberOfPoints; ++pointId)
     {
@@ -835,6 +870,10 @@ int main(int argc, char* argv[])
     }
   sofa::simulation::getSimulation()->init(root.get());
 
+  if (Verbose)
+    {
+    std::cout << "Done Init..." << std::endl;
+    }
   int gluArgc  = 1;
   char** gluArgv = new char *;
   gluArgv[0] = new char[strlen(argv[0])+1];
@@ -872,32 +911,32 @@ int main(int argc, char* argv[])
       }
 
     // Forces take time to start moving the mesh
-    const size_t minimumNumberOfSteps = 30;
-
-    double lastError = 1.;
-    double stdDeviation = 0.;
+//     const size_t minimumNumberOfSteps = 30;
+// 
+//     double lastError = 1.;
+//     double stdDeviation = 0.;
 
     // We can't use the distance error directly because the simulation might
     // oscillate.
-    for (size_t step = 0;
-         (step < minimumNumberOfSteps || stdDeviation > MinimumStandardDeviation) &&
-         (step < static_cast<size_t>(MaximumNumberOfSimulationSteps)) ; ++step)
-      {
-      sofa::simulation::getSimulation()->animate(root.get(), dt);
-      //sofa::simulation::getSimulation()->animate(root.get());
-
-      const double error = meanSquareError(ghostDOF, skullDOF);
-      double mean = (lastError + error) / 2.;
-      stdDeviation = sqrt((pow(lastError - mean, 2) + pow(error - mean, 2)) / 2.);
-      //errorChange =  fabs(lastError-error) / lastError;
-      lastError = error;
-
-      if (Verbose)
-        {
-        std::cout << " Iteration #" << step << " (distance: " << lastError
-                    << " std: " << stdDeviation << std::endl;
-        }
-      }
+//     for (size_t step = 0;
+//          (step < minimumNumberOfSteps || stdDeviation > MinimumStandardDeviation) &&
+//          (step < static_cast<size_t>(MaximumNumberOfSimulationSteps)) ; ++step)
+//       {
+//       sofa::simulation::getSimulation()->animate(root.get(), dt);
+//       //sofa::simulation::getSimulation()->animate(root.get());
+// 
+//       const double error = meanSquareError(ghostDOF, skullDOF);
+//       double mean = (lastError + error) / 2.;
+//       stdDeviation = sqrt((pow(lastError - mean, 2) + pow(error - mean, 2)) / 2.);
+//       //errorChange =  fabs(lastError-error) / lastError;
+//       lastError = error;
+// 
+//       if (Verbose)
+//         {
+//         std::cout << " Iteration #" << step << " (distance: " << lastError
+//                     << " std: " << stdDeviation << std::endl;
+//         }
+//       }
     }
   vtkNew<vtkPolyData> posedSurface;
   initMesh(posedSurface.GetPointer(), skullDOFNode);

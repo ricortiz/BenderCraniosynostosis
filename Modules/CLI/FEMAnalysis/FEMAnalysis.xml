@@ -39,7 +39,7 @@
     <label>Simulation</label>
     <description><![CDATA[Control the simulation]]></description>
     <boolean>
-      <name>LinearFEM</name>
+      <name>linearFEM</name>
       <label>Linear FEM</label>
       <longflag>--linearFEM</longflag>
       <description><![CDATA[Use linear FEM. This speeds up the initialization step.]]></description>

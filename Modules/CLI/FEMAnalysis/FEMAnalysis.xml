@@ -12,19 +12,29 @@
   <parameters>
     <label>IO</label>
     <description><![CDATA[Input/output parameters]]></description>
+
+    <geometry fileExtensions=".vtk">
+      <name>FixedPointCloud</name>
+      <label>Fixed point cloud</label>
+      <description><![CDATA[Input point cloud used to generate displacement field.]]></description>
+      <channel>input</channel>
+      <index>0</index>
+    </geometry>
+
+    <geometry fileExtensions=".vtk">
+      <name>MovingPointCloud</name>
+      <label>Moving point cloud</label>
+      <description><![CDATA[Input point cloud used to generate displacement field.]]></description>
+      <channel>input</channel>
+      <index>1</index>
+    </geometry>
+
     <geometry fileExtensions=".vtk">
       <name>FixedImageMesh</name>
       <label>Fixed Image Mesh</label>
       <description><![CDATA[Input volumetric mesh of the fixed image.]]></description>
       <channel>input</channel>
-      <index>0</index>
-    </geometry>
-    <geometry fileExtensions=".vtk">
-      <name>MovingImageMesh</name>
-      <label>Fixed Image Mesh</label>
-      <description><![CDATA[Input volumetric mesh of the moving image.]]></description>
-      <channel>input</channel>
-      <index>1</index>
+      <index>2</index>
     </geometry>
 
     <geometry fileExtensions=".vtk">
@@ -34,6 +44,23 @@
       <channel>output</channel>
       <index>3</index>
     </geometry>
+
+    <transform fileExtensions=".tfm">
+      <name>OutputTransform</name>
+      <label>Output computed transform</label>
+      <longflag>--saveTransform</longflag>
+      <description><![CDATA[Output computed tranform result from the point cloud registration.]]></description>
+      <channel>output</channel>
+    </transform>
+
+    <transform fileExtensions=".tfm">
+      <name>InputTransform</name>
+      <label>Input transform</label>
+      <longflag>--inputTransform</longflag>
+      <description><![CDATA[Input transform to warp the fixed point cloud.]]></description>
+      <channel>input</channel>
+    </transform>
+
   </parameters>
   <parameters>
     <label>Simulation</label>

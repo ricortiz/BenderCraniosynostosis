@@ -1,7 +1,7 @@
 /*=========================================================================
 
   Program:   Insight Segmentation & Registration Toolkit
-  Module:    $RCSfile: itkVTKTetrahedralMeshReader.h,v $
+  Module:    $RCSfile: itkVTKPointCloudReader.h,v $
   Language:  C++
   Date:      $Date: 2011-10-05 18:01:00 $
   Version:   $Revision: 1.9 $
@@ -14,8 +14,8 @@
      PURPOSE.  See the above copyright notices for more information.
 
 =========================================================================*/
-#ifndef __itkVTKTetrahedralMeshReader_h
-#define __itkVTKTetrahedralMeshReader_h
+#ifndef __itkVTKPointCloudReader_h
+#define __itkVTKPointCloudReader_h
 
 #include "itkIntTypes.h"
 #include "itkMesh.h"
@@ -26,14 +26,13 @@
 namespace itk
 {
 
-/** \class VTKTetrahedralMeshReader
+ /** \class VTKPointCloudReader
  * \brief
- * Reads a VTKUnstructuredGrid file and create an itkMesh.
+ * Reads a VTKUnstructuredGrid or or VTKPolyData file and create an itkMesh.
  *
- * Caveat1: itkVTKTetrahedralMeshReader can only read tetrahedral meshes.
- *          Use vtkTriangleFilter to convert your mesh to a triangle mesh.
- * Caviet2: itkVTKTetrahedralMeshReader can only read vtk legacy files.
- * Caveat3: itkVTKTetrahedralMeshReader cannot read binary vtk files.
+ * Caveat1: VTKPointCloudReader can only read point clouds.
+ * Caviet2: VTKPointCloudReader can only read vtk legacy files.
+ * Caveat3: VTKPointCloudReader cannot read binary vtk files.
  */
 template <class TOutputMesh>
 class VTKPointCloudReader : public MeshSource<TOutputMesh>
@@ -49,7 +48,7 @@ public:
   itkNewMacro(Self);
 
   /** Run-time type information (and related methods). */
-  itkTypeMacro(VTKTetrahedralMeshReader, MeshSource);
+  itkTypeMacro(VTKPointCloudReader, MeshSource);
 
   /** Hold on to the type information specified by the template parameters. */
   typedef TOutputMesh                          OutputMeshType;
@@ -59,25 +58,13 @@ public:
 
   /** Some convenient typedefs. */
   typedef typename OutputMeshType::Pointer         OutputMeshPointer;
-  typedef typename OutputMeshType::CellTraits      CellTraits;
-  typedef typename OutputMeshType::CellIdentifier  CellIdentifier;
-  typedef typename OutputMeshType::CellType        CellType;
-  typedef typename OutputMeshType::CellAutoPointer CellAutoPointer;
   typedef typename OutputMeshType::PointIdentifier PointIdentifier;
-  typedef typename CellTraits::PointIdIterator     PointIdIterator;
 
   typedef typename OutputMeshType::PointsContainerPointer
     PointsContainerPointer;
 
   typedef typename OutputMeshType::PointsContainer
     PointsContainer;
-
-  /** Define the tetrahedron cell types which form the volume  */
-  typedef TetrahedronCell<CellType>   TetrahedronCellType;
-
-  typedef typename TetrahedronCellType::SelfAutoPointer
-    TetrahedronCellAutoPointer;
-
 
   /** Set the resolution level to be used for generating cells in the
    * Sphere. High values of this parameter will produce sphere with more
@@ -114,7 +101,7 @@ private:
 } // end namespace itk
 
 #ifndef ITK_MANUAL_INSTANTIATION
-#include "itkVTKTetrahedralMeshReader.hxx"
+#include "itkVTKPointCloudReader.hxx"
 #endif
 
-#endif //_itkVTKTetrahedralMeshReader_h
+#endif //_itkVTKPointCloudReader_h

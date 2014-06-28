@@ -1,7 +1,7 @@
 /*=========================================================================
 
   Program:   Insight Segmentation & Registration Toolkit
-  Module:    $RCSfile: itkVTKTetrahedralMeshReader.hxx,v $
+  Module:    $RCSfile: itkVTKPointCloudReader.hxx,v $
   Language:  C++
   Date:      $Date: 2011-10-05 18:01:00 $
   Version:   $Revision: 1.19 $
@@ -14,15 +14,14 @@
      PURPOSE.  See the above copyright notices for more information.
 
 =========================================================================*/
-#ifndef __itkVTKTetrahedralMeshReader_hxx
-#define __itkVTKTetrahedralMeshReader_hxx
+#ifndef __itkVTKPointCloudReader_hxx
+#define __itkVTKPointCloudReader_hxx
 
 #include <fstream>
 #include <cstdio>
 #include <cstring>
 
-#include "benderIOUtils.h"
-#include "itkVTKTetrahedralMeshReader.h"
+#include "itkVTKPointCloudReader.h"
 
 // VTK includes
 #include "vtkCellArray.h"
@@ -44,7 +43,7 @@ namespace itk
 //
 template<class TOutputMesh>
 VTKPointCloudReader<TOutputMesh>
-::VTKTetrahedralMeshReader()
+::VTKPointCloudReader()
 {
   //
   // Create the output
@@ -59,7 +58,7 @@ VTKPointCloudReader<TOutputMesh>
 //
 template<class TOutputMesh>
 VTKPointCloudReader<TOutputMesh>
-::~VTKTetrahedralMeshReader()
+::~VTKPointCloudReader()
 {
 }
 
@@ -70,10 +69,6 @@ VTKPointCloudReader<TOutputMesh>
 {
 
   OutputMeshType * outputMesh = this->GetOutput();
-
-  outputMesh->SetCellsAllocationMethod(
-    OutputMeshType::CellsAllocatedDynamicallyCellByCell );
-
 
   if( m_FileName == "" )
   {
@@ -89,7 +84,7 @@ VTKPointCloudReader<TOutputMesh>
   {
     vtkMesh = vtkPolyData::SafeDownCast(reader->GetPolyDataOutput());
   }
-  if(reader->IsFileUnstructuredGrid())
+  else
   {
     vtkMesh = vtkUnstructuredGrid::SafeDownCast(reader->GetUnstructuredGridOutput());
   }
@@ -111,68 +106,6 @@ VTKPointCloudReader<TOutputMesh>
     point[2] = p[2];
 
     outputMesh->SetPoint( pointId, point );
-  }
-
-  CellIdentifier numberOfCells = vtkMesh->GetNumberOfCells();
-  vtkCellArray *tetras;
-  if(reader->IsFilePolyData())
-    tetras = vtkPolyData::SafeDownCast(vtkMesh)->GetPolys();
-  else
-    tetras = vtkUnstructuredGrid::SafeDownCast(vtkMesh)->GetCells();
-  //
-  // Load the cells into the itk::Mesh
-  //
-
-  tetras->InitTraversal();
-  PointIdentifier numberOfCellPoints;
-
-  vtkNew<vtkIdList> element;
-  for (CellIdentifier cellId = 0; tetras->GetNextCell(element.GetPointer()); ++cellId)
-  {
-    numberOfCellPoints = element->GetNumberOfIds();
-    if(element->GetNumberOfIds() != 4)
-    {
-      itkExceptionMacro(<< "Error reading file: " << m_FileName
-      << "\nnumberOfCellPoints != 4\n"
-      << "numberOfCellPoints= " << numberOfCellPoints
-      << ". VTKTetrahedralMeshReader can only read tetrahedra");
-    }
-
-    vtkIdType ids[4] = {
-      element->GetId(0),
-      element->GetId(1),
-      element->GetId(2),
-      element->GetId(3)
-    };
-
-    if( ids[0] < 0 || ids[1] < 0 || ids[2] < 0 || ids[3] < 0 )
-    {
-      itkExceptionMacro(<< "Error reading file: " << m_FileName
-      << "point ids must be >= 0.\n"
-      "ids=" << ids[0] << " " << ids[1] << " " << ids[2] << " " << ids[3]);
-    }
-
-    if( static_cast<PointIdentifier>( ids[0] ) >= numberOfPoints ||
-      static_cast<PointIdentifier>( ids[1] ) >= numberOfPoints ||
-      static_cast<PointIdentifier>( ids[2] ) >= numberOfPoints ||
-      static_cast<PointIdentifier>( ids[3] ) >= numberOfPoints )
-    {
-      itkExceptionMacro(<< "Error reading file: " << m_FileName
-      << "Point ids must be < number of points: "
-      << numberOfPoints
-      << "\nids= " << ids[0] << " " << ids[1] << " " << ids[2] << " " << ids[3]);
-    }
-
-    CellAutoPointer cell;
-
-    TetrahedronCellType * tetrahedronCell = new TetrahedronCellType;
-    for( PointIdentifier pointId = 0; pointId < numberOfCellPoints; pointId++ )
-    {
-      tetrahedronCell->SetPointId( pointId, ids[pointId] );
-    }
-
-    cell.TakeOwnership( tetrahedronCell );
-    outputMesh->SetCell( cellId, cell );
   }
 
 }

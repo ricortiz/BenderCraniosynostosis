@@ -65,45 +65,43 @@
   <parameters>
     <label>Simulation</label>
     <description><![CDATA[Control the simulation]]></description>
-    <boolean>
-      <name>linearFEM</name>
-      <label>Linear FEM</label>
-      <longflag>--linearFEM</longflag>
-      <description><![CDATA[Use linear FEM. This speeds up the initialization step.]]></description>
-      <default>true</default>
-    </boolean>
-    <double>
-      <name>youngModulus</name>
-      <label>Young Modulus</label>
-      <longflag>--youngModulus</longflag>
-      <description><![CDATA[An uniform Young modulus parameter.]]></description>
-      <default>100000</default>
-    </double>
-    <double>
-      <name>poissonRatio</name>
-      <label>Poisson Ratio</label>
-      <longflag>--poissonRatio</longflag>
-      <description><![CDATA[An uniform Poisson ratio parameter.]]></description>
-      <default>100000</default>
-    </double>
-  </parameters>
-  <parameters>
-    <label>Animation</label>
-    <description><![CDATA[Control the animation]]></description>
-    <boolean>
-      <name>GUI</name>
-      <label>GUI</label>
-      <longflag>--gui</longflag>
-      <description><![CDATA[Show SOFA gui.]]></description>
-      <default>false</default>
-    </boolean>
     <integer>
       <name>MaximumNumberOfSimulationSteps</name>
       <label>Maximum number of steps</label>
       <longflag>--maxSteps</longflag>
       <description><![CDATA[The simulation stops when there is no more significant change between two steps or if the maximum number of simulation steps is reached.]]></description>
-      <default>1000</default>
+      <default>2000</default>
     </integer>
+    <string-enumeration>
+      <name>TimeIntegratorType</name>
+      <label>Time integrator type</label>
+      <longflag>--timeIntegratorType</longflag>
+      <description><![CDATA[Type of time integrator to use.]]></description>
+      <default>Implicit</default>
+      <element>Explicit</element>  
+    </string-enumeration>
+    <double>
+      <name>pressureForce</name>
+      <label>Pressure Force</label>
+      <longflag>--pressureForce</longflag>
+      <description><![CDATA[Pressure force magnitude applied uniformly to the nodes.]]></description>
+      <default>3000.0</default>
+    </double>
+    <double>
+      <name>initialDistanceFraction</name>
+      <label>Initial distance fraction</label>
+      <longflag>--initialDistanceFraction</longflag>
+      <description><![CDATA[Fraction of the distace between displacement to use as initial spring distance.]]></description>
+      <default>.01</default>
+    </double>
+    <double>
+      <name>dt</name>
+      <label>Time Step</label>
+      <longflag>--dt</longflag>
+      <description><![CDATA[Fixed time-step.]]></description>
+      <default>0.01</default>
+    </double>
+    
     <integer>
       <name>MinimumStandardDeviation</name>
       <label>Minimum standard deviation</label>
@@ -115,7 +113,40 @@
         <maximum>1000</maximum>
         <step>1</step>
       </constraints>
-    </integer>
+    </integer>      
+    <boolean>
+      <name>linearFEM</name>
+      <label>Linear FEM</label>
+      <longflag>--linearFEM</longflag>
+      <description><![CDATA[Use linear FEM. This speeds up the initialization step.]]></description>
+      <default>true</default>
+    </boolean>
+    <double>
+      <name>youngModulus</name>
+      <label>Young Modulus (N/m^2)</label>
+      <longflag>--youngModulus</longflag>
+      <description><![CDATA[An uniform Young's modulus parameter in (N/m^2).]]></description>
+      <default>380000000</default>
+    </double>
+    <double>
+      <name>poissonRatio</name>
+      <label>Poisson Ratio</label>
+      <longflag>--poissonRatio</longflag>
+      <description><![CDATA[An uniform Poisson ratio parameter.]]></description>
+      <default>.22</default>
+    </double>
+  
+  </parameters>
+  <parameters>
+    <label>Animation</label>
+    <description><![CDATA[Control the animation]]></description>
+    <boolean>
+      <name>GUI</name>
+      <label>GUI</label>
+      <longflag>--gui</longflag>
+      <description><![CDATA[Show SOFA gui.]]></description>
+      <default>false</default>
+    </boolean>
   </parameters>
   <parameters advanced="true">
     <label>Advanced</label>

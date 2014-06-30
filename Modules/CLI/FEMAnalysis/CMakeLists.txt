@@ -28,6 +28,9 @@ find_package(VTK REQUIRED)
 find_package(Bender REQUIRED)
 include(${Bender_USE_FILE})
 
+find_package(Eigen3 REQUIRED) #requires FindEigen3.cmake to be in the source directory
+include_directories(${EIGEN3_INCLUDE_DIR})
+
 find_package(SOFA REQUIRED)
 include(${SOFA_USE_FILE})
 

@@ -24,6 +24,9 @@
 #include "itkVTKTetrahedralMeshReader.h"
 #include "itkVTKPointCloudReader.h"
 
+// Eigen includes
+#include <Eigen/Eigenvalues>
+
 // OpenGL includes
 //#include <GL/glew.h>
 //#include <GL/glut.h>
@@ -34,7 +37,6 @@
 #include <sofa/component/misc/VTKExporter.h>
 #include <sofa/component/odesolver/EulerImplicitSolver.h>
 #include <sofa/component/odesolver/EulerSolver.h>
-#include <sofa/component/projectiveconstraintset/ProjectToPointConstraint.h>
 #include <sofa/component/projectiveconstraintset/FixedConstraint.h>
 #include <sofa/component/topology/MeshTopology.h>
 #include <sofa/component/typedef/Sofa_typedef.h>
@@ -43,7 +45,8 @@
 #include <sofa/helper/vector.h>
 #include <sofa/simulation/common/Node.h>
 #include <sofa/simulation/graph/DAGSimulation.h>
-#include <sofa/component/mapping/SubsetMapping.h>
+#include <sofa/component/topology/Mesh2PointTopologicalMapping.h>
+#include <sofa/component/topology/PointSetTopologyContainer.h>
 
 // SofaFlexible includes
 #include <plugins/Flexible/quadrature/TopologyGaussPointSampler.h>
@@ -78,6 +81,10 @@
 #include <itkPointSetToPointSetRegistrationMethod.h>
 #include <itkDanielssonDistanceMapImageFilter.h>
 #include <itkPointSetToImageFilter.h>
+#include <itkPointsLocator.h>
+#include <itkResampleImageFilter.h>
+#include <itkBSplineScatteredDataPointSetToImageFilter.h>
+#include <itkNearestNeighborExtrapolateImageFunction.h>
 
 // BenderVTK includes
 #include <vtkDualQuaternion.h>
@@ -152,12 +159,8 @@ public:
       {
       return;
       }
-
-//     std::cout << "Value = " << optimizer->GetCachedValue() << std::endl;
-    std::cout << "Position = "  << optimizer->GetCachedCurrentPosition() <<
-      std::endl;
+    std::cout << "Position = "  << optimizer->GetCachedCurrentPosition() << std::endl;
     std::cout << "Iteration = " << ++iteration << std::endl;
-    std::cout << std::endl << std::endl;
 
   }
 
@@ -269,9 +272,16 @@ Node::SPtr createVisualNode(Node *                        parentNode,
 // ---------------------------------------------------------------------
 MechanicalObject<Vec3Types>::SPtr loadFixedPointCloud(
   Node * parentNode,
-  itk::PointSet<float,3> *pointCloud
+  itk::PointSet<float,3> *pointCloud,
+  bool Verbose
   )
 {
+  if (Verbose)
+    {
+    std::cout << "************************************************************"
+              << std::endl;
+    std::cout << "Create fixed point mechanical object..." << std::endl;
+    }
   typedef itk::PointSet<float,3>::PointsContainer PointsContainer;
 
   MechanicalObject<Vec3Types>::SPtr fixedCloudDOF =
@@ -286,13 +296,10 @@ MechanicalObject<Vec3Types>::SPtr loadFixedPointCloud(
 
   copyVertices(points,fixedCloudDOF.get());
 
-  // Create the MeshTopology
-  MeshTopology::SPtr meshTopology =
-  addNew<MeshTopology>(parentNode, "Topology");
-  meshTopology->seqPoints.setParent(&fixedCloudDOF->x);
-
-  UniformMass3::SPtr frameMass = addNew<UniformMass3>(parentNode,"FrameMass");
-  frameMass->setTotalMass(1);
+  // Create the Point Set Topology
+  PointSetTopologyContainer::SPtr pointSetTopology =
+  addNew<PointSetTopologyContainer>(parentNode, "Topology");
+  pointSetTopology->getPointDataArray().setParent(&fixedCloudDOF->x);
 
   return fixedCloudDOF;
 }
@@ -300,47 +307,124 @@ MechanicalObject<Vec3Types>::SPtr loadFixedPointCloud(
 // ---------------------------------------------------------------------
 MechanicalObject<Vec3Types>::SPtr loadWarpedPointCloud(
   Node * parentNode,
-  itk::TranslationTransform< double,3>* transform,
-  itk::PointSet<float,3> *pointCloud
+  itk::PointSet<float,3> *fixedPointCloud,
+  itk::PointSet<float,3> *movingPointCloud,
+  unsigned int numPoints = 10,
+  bool Verbose = false
   )
 {
-  typedef itk::PointSet<float,3>::PointsContainer PointsContainer;
+  if (Verbose)
+    {
+    std::cout << "************************************************************"
+              << std::endl;
+    std::cout << "Create warped point mechanical object..." << std::endl;
+    }
+    typedef itk::PointSet<float,3> PointCloudType;
+    typedef PointCloudType::PointIdentifier PointIdentifier;
+    typedef PointCloudType::PointsContainer PointsContainer;
+    typedef PointCloudType::PointType PointType;
+    
+    itk::PointsLocator<PointCloudType::PointsContainer>::Pointer pointsLocator = 
+        itk::PointsLocator<PointCloudType::PointsContainer>::New();
+    pointsLocator->SetPoints(movingPointCloud->GetPoints());
+    pointsLocator->Initialize();
+    
+    PointCloudType::PointIdentifier size = fixedPointCloud->GetNumberOfPoints();
 
+    PointsContainer::Pointer outputPoints = PointsContainer::New();
+    outputPoints->resize(size);
+    for(PointCloudType::PointIdentifier i = 0; i < size; ++i)
+    {
+        std::vector<PointCloudType::PointIdentifier> points;
+        PointType dx, fixedPoint, movingPoint; 
+        
+        fixedPoint = fixedPointCloud->GetPoint(i);
+        pointsLocator->FindClosestNPoints(fixedPoint,numPoints,points);
+        dx.Fill(0);
+        for(size_t k = 0; k < points.size(); ++k)
+        {
+            PointType p = movingPointCloud->GetPoint(points[k]);
+            dx += (p-fixedPoint );
+        }
+        float scale = 1.0f/points.size();
+        dx[0]*=scale;
+        dx[1]*=scale;
+        dx[2]*=scale;
+        movingPoint[0] = fixedPoint[0]+dx[0];
+        movingPoint[1] = fixedPoint[1]+dx[1];
+        movingPoint[2] = fixedPoint[2]+dx[2];
+        outputPoints->SetElement(i,movingPoint);
+    }    
+    
+    MechanicalObject<Vec3Types>::SPtr movingCloudDOF =
+    addNew<MechanicalObject<Vec3Types> >(parentNode, "movingCloudDOF");
+
+    copyVertices(outputPoints,movingCloudDOF.get());
+    
+    // Create the Point Set Topology
+    PointSetTopologyContainer::SPtr pointSetTopology =
+    addNew<PointSetTopologyContainer>(parentNode, "Topology");
+    pointSetTopology->getPointDataArray().setParent(&movingCloudDOF->x);
+    
+    return movingCloudDOF;
+}
+
+// ---------------------------------------------------------------------
+MechanicalObject<Vec3Types>::SPtr loadWarpedPointCloud(
+  Node * parentNode,
+  itk::TranslationTransform< double,3>* transform,
+  itk::PointSet<float,3> *fixedPointCloud,
+  itk::PointSet<float,3> *movingPointCloud,
+  bool Verbose
+  )
+{
+  if (Verbose)
+    {
+    std::cout << "************************************************************"
+              << std::endl;
+    std::cout << "Create warped point mechanical object..." << std::endl;
+    }
+  typedef itk::Image<unsigned char,3> BinaryImageType;
+  typedef itk::PointSet<float,3> PointSetType;
+  typedef PointSetType::PointsContainer PointsContainer;
+  
   MechanicalObject<Vec3Types>::SPtr warpedCloudDOF =
     addNew<MechanicalObject<Vec3Types> >(parentNode, "warpedCloudDOF");
 
   // Get positions
-  size_t numberOfPoints = pointCloud->GetNumberOfPoints();
-  std::cout << "Number of points: " << numberOfPoints << std::endl;
+  size_t numberOfPoints = fixedPointCloud->GetNumberOfPoints();
+  if (Verbose)
+    {
+    std::cout << "Number of points: " << numberOfPoints << std::endl;
+    }
 
-  // Traverse pointCloud nodes
+  // Traverse fixedPointCloud nodes
   PointsContainer *points =
-    pointCloud->GetPoints();
+    fixedPointCloud->GetPoints();
   itk::TranslationTransform< double,3>::InputPointType  fixedPoint;
   itk::TranslationTransform< double,3>::OutputPointType movingPoint;
+  itk::TranslationTransform< double,3>::InverseTransformBasePointer inverseTransform = transform->GetInverseTransform();
 
   warpedCloudDOF->resize(numberOfPoints);
   Data<MechanicalObject<Vec3Types>::VecCoord> *x =
     warpedCloudDOF->write(sofa::core::VecCoordId::position());
 
+  BinaryImageType::IndexType index;
   MechanicalObject<Vec3Types>::VecCoord &vertices = *x->beginEdit();
   for(size_t i = 0; i < numberOfPoints; ++i)
     {
     fixedPoint  = points->GetElement(i);
-    movingPoint = transform->TransformPoint(fixedPoint);
-
+    movingPoint = inverseTransform->TransformPoint(fixedPoint);
     vertices[i][0] = movingPoint[0];
     vertices[i][1] = movingPoint[1];
     vertices[i][2] = movingPoint[2];
     }
   x->endEdit();
 
-  MeshTopology::SPtr meshTopology =
-  addNew<MeshTopology>(parentNode, "Topology");
-  meshTopology->seqPoints.setParent(&warpedCloudDOF->x);
-
-  UniformMass3::SPtr frameMass = addNew<UniformMass3>(parentNode,"FrameMass");
-  frameMass->setTotalMass(1);
+  // Create the Point Set Topology
+  PointSetTopologyContainer::SPtr pointSetTopology =
+  addNew<PointSetTopologyContainer>(parentNode, "Topology");
+  pointSetTopology->getPointDataArray().setParent(&warpedCloudDOF->x);
 
   return warpedCloudDOF;
 }
@@ -352,30 +436,33 @@ MechanicalObject<Vec3Types>::SPtr loadWarpedPointCloud(
 void createFiniteElementModel(Node* parentNode, bool linearFEM,
                               const Vec3Types::Real &youngModulus,
                               const Vec3Types::Real &poissonRatio,
-                              bool verbose = false
+                              bool Verbose = false
                               )
 {
+    
+  if (Verbose)
+    {
+    std::cout << "************************************************************"
+              << std::endl;
+    std::cout << "Create finite element model..." << std::endl;
+    }
   if (linearFEM)
     {
-    if (verbose)
+    if (Verbose)
       {
-      std::cout <<
-        "************************************************************"
-                << std::endl;
       std::cout << "Create linear FEM..." << std::endl;
       }
     TetrahedronFEMForceField< Vec3Types >::SPtr femSolver =
       addNew<TetrahedronFEMForceField< Vec3Types > >(parentNode,"femSolver");
     femSolver->setComputeGlobalMatrix(false);
     femSolver->setMethod("large");
-    femSolver->setPoissonRatio(.35);
+    femSolver->setPoissonRatio(poissonRatio);
     femSolver->setYoungModulus(youngModulus);
+    femSolver->_computeVonMisesStress.setValue(2);
     return;
     }
-  if (verbose)
+  if (Verbose)
     {
-    std::cout << "************************************************************"
-              << std::endl;
     std::cout << "Create non-linear FEM..." << std::endl;
     }
   Node::SPtr                   behavior = parentNode->createChild("behavior");
@@ -429,9 +516,16 @@ void createFiniteElementModel(Node* parentNode, bool linearFEM,
 /// the corresponding MeshTopology.
 // ---------------------------------------------------------------------
 MechanicalObject<Vec3Types>::SPtr loadMesh(Node* parentNode,
-                                           itk::Mesh<float,3> *polyMesh
+                                           itk::Mesh<float,3> *polyMesh,
+                                           bool Verbose
                                            )
 {
+  if (Verbose)
+    {
+    std::cout << "************************************************************"
+              << std::endl;
+    std::cout << "Create mechanical object with tetrahedral mesh..." << std::endl;
+    }
   typedef itk::Mesh<float,3>::CellType CellType;
   typedef itk::Mesh<float,3>::CellsContainer::ConstIterator CellIterator;
   typedef itk::TetrahedronCell< CellType >  TetrahedronType;
@@ -460,9 +554,10 @@ MechanicalObject<Vec3Types>::SPtr loadMesh(Node* parentNode,
 
   tetrahedra.reserve(polyMesh->GetNumberOfCells());
 
-  std::cout << "Total # of tetrahedra: " << polyMesh->GetNumberOfCells()
-            << std::endl;
-
+  if (Verbose)
+    {
+    std::cout << "Total # of tetrahedra: " << polyMesh->GetNumberOfCells() << std::endl;
+    }
   CellIterator cellIterator = tetras->Begin();
   CellIterator cellEnd      = tetras->End();
   while(cellIterator != cellEnd)
@@ -517,11 +612,100 @@ void createEulerSolverNode(Node::SPtr         parentNode,
 }
 
 //------------------------------------------------------------------------------
-void initMesh(vtkPolyData* outputPolyData, Node::SPtr anatomicalMesh)
+void computeVonMisesStress(TetrahedronFEMForceField<Vec3Types>* FemSolver,
+    sofa::helper::vector<Vec3Types::Real> &vonMisesStress,
+    sofa::helper::vector<Vec<6,Vec3Types::Real> > &strain,
+    sofa::helper::vector<VecNoInit<6,Vec3Types::Real> > &stress,
+    VecCoord3 &displacements, bool Verbose
+    
+)
 {
-  MeshTopology *     topology = anatomicalMesh->getNodeObject<MeshTopology>();
+    if (Verbose)
+    {
+    std::cout << "************************************************************"
+              << std::endl;
+    std::cout << "Computing stresses..." << std::endl;
+    }
+    MechanicalObject3* mechanicalObject;
+    FemSolver->getContext()->get(mechanicalObject);
+    
+    BaseMeshTopology* mesh;
+    FemSolver->getContext()->get(mesh);
+    
+    const VecCoord3& X = *mechanicalObject->getX();
+    ReadAccessor<Data<VecCoord3> > X0 =  FemSolver->_initialPoints;
+
+    for (size_t i = 0; i < X0.size(); i++)
+        displacements[i] = (X[i] - X0[i]);
+
+//     std::cout << "Displ = " << displacements << std::endl;
+    
+    BaseMeshTopology::SeqTetrahedra::const_iterator it;
+    size_t el;
+
+    for(it = mesh->getTetrahedra().begin(), el = 0 ; it != mesh->getTetrahedra().end() ; ++it, ++el)
+    {
+        Vec<6,Vec3Types::Real> vStrain;
+        Mat<3,3,Vec3Types::Real> gradU;
+        Mat<4,4,Vec3Types::Real>& shf = FemSolver->elemShapeFun[el];
+
+        /// compute gradU
+        for (size_t k = 0; k < 3; ++k) {
+            for (size_t l = 0; l < 3; ++l)  {
+                gradU[k][l] = 0.0;
+                for (size_t m = 0; m < 4; ++m)
+                    gradU[k][l] += shf[l+1][m] * displacements[(*it)[m]][k];
+            }
+        }
+//         std::cout << "gradU = " << gradU<< std::endl;
+
+        Mat<3,3,Vec3Types::Real> strainMatrix = ((Vec3Types::Real)0.5)*(gradU + gradU.transposed() + gradU.transposed()*gradU);
+
+        // Voigt notation for strain tensor
+        for (size_t i = 0; i < 3; ++i)
+            vStrain[i] = strainMatrix[i][i];
+        
+        vStrain[3] = strainMatrix[1][2];
+        vStrain[4] = strainMatrix[0][2];
+        vStrain[5] = strainMatrix[0][1];
+
+        Vec3Types::Real lambda = FemSolver->elemLambda[el];
+        Vec3Types::Real mu = FemSolver->elemMu[el];
+
+        /// stress
+        VecNoInit<6,Vec3Types::Real> s;
+
+        Vec3Types::Real traceStrain = 0.0;
+        for (size_t k = 0; k < 3; ++k) {
+            traceStrain += vStrain[k];
+            s[k] = vStrain[k]*2*mu;
+        }
+
+        for (size_t k = 3; k < 6; ++k)
+            s[k] = vStrain[k]*2*mu;
+
+        for (size_t k = 0; k < 3; ++k)
+            s[k] += lambda*traceStrain;
+
+        Vec3Types::Real vM;
+        vM = sofa::helper::rsqrt(s[0]*s[0] + s[1]*s[1] + s[2]*s[2] - s[0]*s[1] - s[1]*s[2] - s[2]*s[0] + 3*s[3]*s[3] + 3*s[4]*s[4] + 3*s[5]*s[5]);
+        if (vM < 1e-10)
+            vM = 0.0;
+        
+        vonMisesStress[el]=(vM);
+        stress[el]=(s);
+        strain[el]=(vStrain);
+
+//         std::cout << "VMStress: " << vM << std::endl;
+    }
+}
+    
+//------------------------------------------------------------------------------
+void initMesh(vtkPolyData* outputPolyData, Node::SPtr skullMeshDOF, bool Verbose)
+{
+  MeshTopology *     topology = skullMeshDOF->getNodeObject<MeshTopology>();
   MechanicalObject3 *dof      =
-    anatomicalMesh->getNodeObject<MechanicalObject3>();
+    skullMeshDOF->getNodeObject<MechanicalObject3>();
 
   vtkNew<vtkPoints> points;
   const vtkIdType   numberOfPoints = topology->getNbPoints();
@@ -552,26 +736,129 @@ void initMesh(vtkPolyData* outputPolyData, Node::SPtr anatomicalMesh)
   vtkNew<vtkFloatArray> forceVectors;
   forceVectors->SetNumberOfComponents(3);
   forceVectors->SetName("Forces");
-
   forceVectors->SetNumberOfTuples(forces.size());
+  
+  vtkNew<vtkFloatArray> displacements;
+  displacements->SetName("Displacements");
+  displacements->SetNumberOfComponents(1);
+  displacements->SetNumberOfValues(forces.size());
 
+  vtkNew<vtkFloatArray> vonMisesStress;
+  vonMisesStress->SetNumberOfComponents(1);
+  vonMisesStress->SetName("Von Mises Stress");
+  vonMisesStress->SetNumberOfValues(topology->getNbTetras());
+  
+  vtkNew<vtkFloatArray> stressEigenvalues;
+  stressEigenvalues->SetNumberOfComponents(3);
+  stressEigenvalues->SetName("Stress Eigenvalues");
+  stressEigenvalues->SetNumberOfValues(topology->getNbTetras());
+  
+  vtkNew<vtkFloatArray> strainEigenvalues;
+  strainEigenvalues->SetNumberOfComponents(3);
+  strainEigenvalues->SetName("Strain Eigenvalues");
+  strainEigenvalues->SetNumberOfValues(topology->getNbTetras());
+
+  TetrahedronFEMForceField<Vec3Types>* FEM = dynamic_cast<TetrahedronFEMForceField<Vec3Types>*>(skullMeshDOF->getObject("SkullMesh_femSolver"));
+    
+  sofa::helper::vector<Vec3Types::Real> vmStress;
+  vmStress.resize(topology->getNbTetras());
+  sofa::helper::vector<Vec<6,Vec3Types::Real> > strain;
+  strain.resize(topology->getNbTetras());
+  sofa::helper::vector<VecNoInit<6,Vec3Types::Real> > stress;
+  stress.resize(topology->getNbTetras());
+  sofa::helper::vector<Vec<3,Vec3Types::Real> > dx;
+  dx.resize(forces.size());
+
+  computeVonMisesStress(FEM,vmStress,strain,stress,dx,Verbose);
+  
+  if (Verbose)
+    {
+    std::cout << "************************************************************"
+              << std::endl;
+    std::cout << "Populating VTK point data..." << std::endl;
+    }
   for(size_t i = 0, end = forces.size(); i< end; ++i)
     {
     float f[3] = {0};
     f[0] = forces[i][0];
     f[1] = forces[i][1];
     f[2] = forces[i][2];
-
+  
     forceVectors->SetTupleValue(i,f);
+    displacements->SetValue(i,dx[i].norm());
+  
     }
+  
+  if (Verbose)
+    {
+    std::cout << "************************************************************"
+              << std::endl;
+    std::cout << "Populating VTK cell data..." << std::endl;
+    std::cout << "Num tetras = " << topology->getNbTetras() << std::endl;
+    }
+    
+  Eigen::EigenSolver<Eigen::Matrix3d> eigenSolver;
+  for(int i = 0, end = topology->getNbTetras(); i < end; ++i)
+  {
+    vonMisesStress->SetValue(i,vmStress[i]);
+        
+    // Voigt tensor notation to matrix
+    Eigen::Matrix3d stressMatrix, strainMatrix;
+    stressMatrix << stress[i][0] , stress[i][5] , stress[i][4],
+                    stress[i][5] , stress[i][1] , stress[i][3],
+                    stress[i][4] , stress[i][3] , stress[i][2];
+                    
+    strainMatrix << strain[i][0] , strain[i][5] , strain[i][4],
+                    strain[i][5] , strain[i][1] , strain[i][3],
+                    strain[i][4] , strain[i][3] , strain[i][2];              
+                    
+//     std::cout << stressMatrix << std::endl;
+//     std::cout << strainMatrix << std::endl;
+    eigenSolver.compute(stressMatrix,false);
+    
+    const Eigen::Vector3cd &eigenvalues = eigenSolver.eigenvalues();
+//     std::cout << eigenvalues << std::endl;
+    
+    stressEigenvalues->SetTuple3(i,eigenvalues[0].real(),eigenvalues[1].real(),eigenvalues[2].real());
+//     
+//     eigenSolver.compute(strainMatrix,false);
+//     
+//     eigenvalues = eigenSolver.eigenvalues();
+//     
+//     e[0] = eigenvalues[0].real();
+//     e[1] = eigenvalues[1].real();
+//     e[2] = eigenvalues[2].real();
+//         
+//     strainEigenvalues->SetTupleValue(i,e);
+    
+  }
 
+    if (Verbose)
+    {
+    std::cout << "************************************************************"
+                << std::endl;
+    std::cout << "Adding Point Data Arrays..." << std::endl;
+    }
   outputPolyData->GetPointData()->AddArray(forceVectors.GetPointer());
+  outputPolyData->GetPointData()->AddArray(displacements.GetPointer());
 
+
+    if (Verbose)
+    {
+    std::cout << "************************************************************"
+                << std::endl;
+    std::cout << "Adding cell Data Arrays..." << std::endl;
+    }
+  outputPolyData->GetCellData()->AddArray(vonMisesStress.GetPointer());
+//   outputPolyData->GetCellData()->AddArray(stressEigenvalues.GetPointer());
+//   outputPolyData->GetCellData()->AddArray(strainEigenvalues.GetPointer());
 }
 
 //------------------------------------------------------------------------------
 double meanSquareError(MechanicalObject<Vec3Types>::SPtr mesh1,
-                       MechanicalObject<Vec3Types>::SPtr mesh2)
+                       MechanicalObject<Vec3Types>::SPtr mesh2,
+                       const std::vector<itk::PointSet<float,3>::PointIdentifier> &indexMap
+                      )
 {
   const Data<MechanicalObject<Vec3Types>::VecCoord>* position1 =
     mesh1->read(VecCoordId::position());
@@ -590,23 +877,20 @@ double meanSquareError(MechanicalObject<Vec3Types>::SPtr mesh1,
   const MechanicalObject<Vec3Types>::VecCoord& vertices2 =
     position2->getValue();
 
-  size_t numberOfPoints = vertices1.size();
+  size_t numberOfPoints = indexMap.size();
   if (numberOfPoints != vertices2.size())
     {
     std::cerr << "Not the same number of vertices: "
-              << vertices1.size() << " != " << vertices2.size() << std::endl;
+              << vertices2.size() << " != " << indexMap.size() << std::endl;
     return -1.;
     }
 
   double                                                error = 0.;
-  MechanicalObject<Vec3Types>::VecCoord::const_iterator it1;
-  MechanicalObject<Vec3Types>::VecCoord::const_iterator it2;
-  for(it1 = vertices1.begin(), it2 = vertices2.begin();
-      it1 != vertices1.end();
-      ++it1, ++it2)
+
+  for(size_t i = 0, j = 0; j < numberOfPoints ; ++i, ++j)
     {
-    Vector3 distance = *it1 - *it2;
-    error += distance.norm2() / numberOfPoints;
+    Vector3 dx = vertices1[indexMap[j]] - vertices2[j];
+    error += dx.norm2() / numberOfPoints;
     }
   return error;
 }
@@ -620,18 +904,20 @@ registerPointClouds(itk::PointSet<float,3> *fixedMesh,
                     const double &epsilonFunction,
                     bool Verbose = false)
 {
+    if (Verbose)
+    {
+    std::cout << "************************************************************"
+                << std::endl;
+    std::cout << "Register meshes using ICP..." << std::endl;
+    }
   typedef itk::PointSet<float,3> PointSetType;
   if (Verbose)
     {
-    std::cout << "************************************************************"
-              << std::endl;
     std::cout << "Number of moving Points = " <<
       movingMesh->GetNumberOfPoints( ) << std::endl;
     }
   if (Verbose)
     {
-    std::cout << "************************************************************"
-              << std::endl;
     std::cout << "Number of fixed Points = " <<
       fixedMesh->GetNumberOfPoints() << std::endl;
     }
@@ -643,8 +929,6 @@ registerPointClouds(itk::PointSet<float,3> *fixedMesh,
   MetricType::Pointer metric = MetricType::New();
   if (Verbose)
     {
-    std::cout << "************************************************************"
-              << std::endl;
     std::cout << "registerMeshes(): Set up a Transform..." << std::endl;
     }
   //-----------------------------------------------------------
@@ -690,8 +974,6 @@ registerPointClouds(itk::PointSet<float,3> *fixedMesh,
 
   if (Verbose)
     {
-    std::cout << "************************************************************"
-              << std::endl;
     std::cout << "registerMeshes(): Prepare the Distance Map..." << std::endl;
     }
   //------------------------------------------------------
@@ -704,35 +986,37 @@ registerPointClouds(itk::PointSet<float,3> *fixedMesh,
   //  filter expects an image as input.
   //
   //-------------------------------------------------
-  typedef itk::Image< unsigned char,  3 >  BinaryImageType;
-  typedef itk::PointSetToImageFilter<PointSetType,
-                                     BinaryImageType> PointsToImageFilterType;
-  PointsToImageFilterType::Pointer pointsToImageFilter =
-    PointsToImageFilterType::New();
-  pointsToImageFilter->SetInput( fixedMesh );
-  BinaryImageType::SpacingType spacing;
-  spacing.Fill( 1.0 );
-  BinaryImageType::PointType origin;
-  origin.Fill( 0.0 );
-  pointsToImageFilter->SetSpacing( spacing );
-  pointsToImageFilter->SetOrigin( origin   );
-  pointsToImageFilter->Update();
-  BinaryImageType::Pointer binaryImage = pointsToImageFilter->GetOutput();
-  typedef itk::Image< unsigned short, 3 >  DistanceImageType;
-  typedef itk::DanielssonDistanceMapImageFilter<BinaryImageType,
-                                                DistanceImageType>
-    DistanceFilterType;
-  DistanceFilterType::Pointer distanceFilter = DistanceFilterType::New();
-  distanceFilter->SetInput( binaryImage );
-  distanceFilter->Update();
-  metric->SetDistanceMap( distanceFilter->GetOutput() );
+  bool useDistanceMap = false;
+  if(useDistanceMap)
+  {
+    typedef itk::Image< unsigned char,  3 >  BinaryImageType;
+    typedef itk::PointSetToImageFilter<PointSetType,
+                                        BinaryImageType> PointsToImageFilterType;
+    PointsToImageFilterType::Pointer pointsToImageFilter =
+        PointsToImageFilterType::New();
+    pointsToImageFilter->SetInput( fixedMesh );
+    BinaryImageType::SpacingType spacing;
+    spacing.Fill( 1.0 );
+    BinaryImageType::PointType origin;
+    origin.Fill( 0.0 );
+    pointsToImageFilter->SetSpacing( spacing );
+    pointsToImageFilter->SetOrigin( origin   );
+    pointsToImageFilter->Update();
+    BinaryImageType::Pointer binaryImage = pointsToImageFilter->GetOutput();
+    typedef itk::Image< unsigned short, 3 >  DistanceImageType;
+    typedef itk::DanielssonDistanceMapImageFilter<BinaryImageType,
+                                                    DistanceImageType>
+        DistanceFilterType;
+    DistanceFilterType::Pointer distanceFilter = DistanceFilterType::New();
+    distanceFilter->SetInput( binaryImage );
+    distanceFilter->Update();
+    metric->SetDistanceMap( distanceFilter->GetOutput() );
+  }
   // Connect an observer
   CommandIterationUpdate::Pointer observer = CommandIterationUpdate::New();
   optimizer->AddObserver( itk::IterationEvent(), observer );
   if (Verbose)
     {
-    std::cout << "************************************************************"
-              << std::endl;
     std::cout << "registerMeshes(): Execute registration..." << std::endl;
     }
   try
@@ -746,11 +1030,37 @@ registerPointClouds(itk::PointSet<float,3> *fixedMesh,
 
   if (Verbose)
     {
-    std::cout << "************************************************************"
-              << std::endl;
     std::cout << "registerMeshes(): Finished registration..." << std::endl;
     }
   return transform;
+}
+
+void mapFixedPointCloudToTetMesh(itk::PointSet<float,3> *pointCloud, 
+                                 itk::PointSet<float,3> *mesh, 
+                                 std::vector<itk::PointSet<float,3>::PointIdentifier> &indexMap, bool Verbose)
+{
+    typedef itk::PointSet<float,3> PointCloudType;
+    
+    itk::PointsLocator<PointCloudType::PointsContainer>::Pointer pointsLocator = 
+        itk::PointsLocator<PointCloudType::PointsContainer>::New();
+    pointsLocator->SetPoints(mesh->GetPoints());
+    pointsLocator->Initialize();
+    
+    PointCloudType::PointIdentifier size = pointCloud->GetNumberOfPoints();
+    
+    indexMap.reserve(size);
+    for(PointCloudType::PointIdentifier i = 0; i < size; ++i)
+    {
+        PointCloudType::PointIdentifier index = pointsLocator->FindClosestPoint(pointCloud->GetPoint(i));
+        indexMap.push_back(index);
+    }
+
+  if (Verbose)
+    {
+    std::cout << "Map between mesh and fixed point cloud created" << std::endl;
+    std::cout << "Total points = " << indexMap.size() << std::endl;  
+    }
+    
 }
 
 itk::TranslationTransform<double,
@@ -793,8 +1103,6 @@ int main(int argc, char* argv[])
   typedef itk::VTKPointCloudReader<PointCloudType> PointCloudReaderType;
 
   typedef itk::VTKTetrahedralMeshReader<MeshType> MeshReaderType;
-
-  const double dt = 0.01;
 
   sofa::simulation::setSimulation(new sofa::simulation::graph::DAGSimulation());
 
@@ -847,35 +1155,26 @@ int main(int argc, char* argv[])
     }
 
   // Read tetrahedral mesh
-  MeshReaderType::Pointer vtkFixedMeshReader = MeshReaderType::New();
-  vtkFixedMeshReader->SetFileName(FixedImageMesh);
+  MeshReaderType::Pointer vtkTetMeshReader = MeshReaderType::New();
+  vtkTetMeshReader->SetFileName(FixedImageMesh);
 
   try
     {
     std::cerr << "Trying to read..." << std::endl;
-    vtkFixedMeshReader->Update();
+    vtkTetMeshReader->Update();
     }
   catch( itk::ExceptionObject & excp )
     {
     std::cerr <<
-      "Error during vtkFixedMeshReader->Update() and vtkMovingMeshReader->Update() "
+      "Error during vtkTetMeshReader->Update() and vtkMovingMeshReader->Update() "
               << std::endl;
     std::cerr << excp << std::endl;
     return EXIT_FAILURE;
     }
 
-  MeshType::Pointer       fixedMesh       = vtkFixedMeshReader->GetOutput();
-  PointCloudType::Pointer fixedPointCloud =
-    vtkFixedPointCloudReader->GetOutput();
-  PointCloudType::Pointer movingPointCloud =
-    vtkMovingPointCloudReader->GetOutput();
-
-  if (Verbose)
-    {
-    std::cout << "************************************************************"
-              << std::endl;
-    std::cout << "Register meshes using ICP..." << std::endl;
-    }
+  MeshType::Pointer       tetMesh       = vtkTetMeshReader->GetOutput();
+  PointCloudType::Pointer fixedPointCloud = vtkFixedPointCloudReader->GetOutput();
+  PointCloudType::Pointer movingPointCloud = vtkMovingPointCloudReader->GetOutput();
 
   itk::TranslationTransform<double,3>::Pointer transform;
   if(InputTransform.size() > 0)
@@ -907,29 +1206,24 @@ int main(int argc, char* argv[])
       }
     }
 
+    if(transform.IsNull())
+    {
+        std::cerr << "Null Transform!" << std::endl;
+        return EXIT_FAILURE;
+    }
 
   // Create a scene node
   Node::SPtr sceneNode = root->createChild("FEMSimulation");
 
-  // Time stepper for the armature
-  createEulerSolverNode(root.get(),"Implicit");
+  // Time stepper 
+  createEulerSolverNode(sceneNode.get(),TimeIntegratorType);
 
-
-  if (Verbose)
-    {
-    std::cout << "************************************************************"
-              << std::endl;
-    std::cout << "Create ghost mesh..." << std::endl;
-    }
-
-  Node::SPtr warpedCloudDOFNode                    = root->createChild(
+  Node::SPtr warpedCloudDOFNode                    = sceneNode->createChild(
     "WarpedDOFCloud");
   MechanicalObject<Vec3Types>::SPtr warpedCloudDOF = loadWarpedPointCloud(
-    warpedCloudDOFNode.get(), transform, fixedPointCloud );
+    warpedCloudDOFNode.get(), fixedPointCloud, movingPointCloud,10u,Verbose);
 
   // Fix the oositions of these points
-  // ROI
-
   FixedConstraint3::SPtr fixWarpedDOF = addNew<FixedConstraint3>(
       warpedCloudDOFNode.get(),"fixedContraint");
   fixWarpedDOF->f_fixAll.setValue(true);
@@ -946,11 +1240,15 @@ int main(int argc, char* argv[])
 
   // Create mesh dof
   MechanicalObject<Vec3Types>::SPtr skullDOF = loadMesh(
-    skullDOFNode.get(), fixedMesh);
-  UniformMass3::SPtr anatomicalMass          = addNew<UniformMass3>(
+    skullDOFNode.get(), tetMesh,Verbose);
+  UniformMass3::SPtr skullMass          = addNew<UniformMass3>(
     skullDOFNode.get(),"Mass");
-  anatomicalMass->setTotalMass(100);
+  skullMass->setTotalMass(100);
 
+  // Add the finite element method to the node
+  createFiniteElementModel(
+    skullDOFNode.get(), true, youngModulus, poissonRatio, Verbose);
+  
   // ROI
   Vector6 box;
   box[0] = 0;
@@ -958,7 +1256,7 @@ int main(int argc, char* argv[])
   box[2] = 0;
   box[3] = 160;
   box[4] = 160;
-  box[5] = 20;
+  box[5] = 10;
 
   // Crete a fix contraint to fix the base of the skull
   BoxROI<Vec3Types>::SPtr boxRoi       = addNew<BoxROI<Vec3Types> >(
@@ -971,53 +1269,29 @@ int main(int argc, char* argv[])
       skullDOFNode.get(),"fixedContraint");
   fixedConstraint->f_indices.setParent(&boxRoi->f_indices);
 
-  Node::SPtr fixedCloudDOFNode                    = root->createChild(
-    "fixedDOFCloud");
-  MechanicalObject<Vec3Types>::SPtr fixedCloudDOF = loadFixedPointCloud(
-    fixedCloudDOFNode.get(), fixedPointCloud );
-
-//   BarycentricMapping3_to_3::SPtr fixedPointCloudToTetMeshMapping =
-//   addNew<BarycentricMapping3_to_3>(fixedCloudDOFNode,"PointCloudToMeshMap");
-//   fixedPointCloudToTetMeshMapping->setModels(fixedCloudDOF.get(),skullDOF.get());
-  SubsetMapping3_to_3::SPtr fixedPointCloudToTetMeshMapping =
-    addNew<SubsetMapping3_to_3>(fixedCloudDOFNode,"PointCloudToMeshMap");
-  fixedPointCloudToTetMeshMapping->setModels(fixedCloudDOF.get(),
-    skullDOF.get());
-
-  if (Verbose)
-    {
-    std::cout << "************************************************************"
-              << std::endl;
-    std::cout << "Create finite element model..." << std::endl;
-    }
-
-  // Finite element method
-  createFiniteElementModel(
-    skullDOFNode.get(), true, youngModulus, poissonRatio, Verbose);
-
   if (Verbose)
     {
     std::cout << "************************************************************"
               << std::endl;
     std::cout << "Create force loads..." << std::endl;
     }
-
+  std::vector<PointCloudType::PointIdentifier> indexMap;
+  mapFixedPointCloudToTetMesh(fixedPointCloud,tetMesh,indexMap,Verbose);
   StiffSpringForceField<Vec3Types>::SPtr loads =
-  sofa::core::objectmodel::New<StiffSpringForceField<Vec3Types> >(fixedCloudDOF.get(),warpedCloudDOF.get());
+  sofa::core::objectmodel::New<StiffSpringForceField<Vec3Types> >(skullDOF.get(),warpedCloudDOF.get());
   loads->setName("Force Loads");
   skullDOFNode->addObject(loads);
-  const VecCoord3 &fixedCloudPositions = *fixedCloudDOF->getX();
+  const VecCoord3 &meshPositions = *skullDOF->getX();
   const VecCoord3 &warpedCloudPositions = *warpedCloudDOF->getX();
-  double stiffness = 100.;
   double distance = 1.;
-  const vtkIdType numberOfPoints = fixedPointCloud->GetPoints()->Size();
+  const vtkIdType numberOfPoints = indexMap.size();
   size_t sample = 0;
   for (vtkIdType pointId = 0; pointId < numberOfPoints; ++pointId)
     {
     if (!(sample++ % 1))
       {
-      distance = .1*(fixedCloudPositions[pointId]-warpedCloudPositions[pointId]).norm();
-      loads->addSpring(pointId, pointId, stiffness, 0.0, distance);
+      distance = initialDistanceFraction*(meshPositions[indexMap[pointId]]-warpedCloudPositions[pointId]).norm();
+      loads->addSpring(indexMap[pointId], pointId, pressureForce, 0.0, distance);
       }
     }
 
@@ -1086,51 +1360,40 @@ int main(int argc, char* argv[])
       }
 
     // Forces take time to start moving the mesh
-//     const size_t minimumNumberOfSteps = 30;
-//
-//     double lastError = 1.;
-//     double stdDeviation = 0.;
+//     const size_t minimumNumberOfSteps = 150;
+
+    double lastError = 1.;
+    double stdDeviation = 0.;
 
     // We can't use the distance error directly because the simulation might
     // oscillate.
-//     for (size_t step = 0;
-//          (step < minimumNumberOfSteps || stdDeviation > MinimumStandardDeviation) &&
-//          (step < static_cast<size_t>(MaximumNumberOfSimulationSteps)) ; ++step)
-//       {
-//       sofa::simulation::getSimulation()->animate(root.get(), dt);
-//       //sofa::simulation::getSimulation()->animate(root.get());
-//
-//       const double error = meanSquareError(warpedDOF, skullDOF);
-//       double mean = (lastError + error) / 2.;
-//       stdDeviation = sqrt((pow(lastError - mean, 2) + pow(error - mean, 2)) / 2.);
-//       //errorChange =  fabs(lastError-error) / lastError;
-//       lastError = error;
-//
-//       if (Verbose)
-//         {
-//         std::cout << " Iteration #" << step << " (distance: " << lastError
-//                     << " std: " << stdDeviation << std::endl;
-//         }
-//       }
+    for (size_t step = 0;stdDeviation > MinimumStandardDeviation ||
+         (step < static_cast<size_t>(MaximumNumberOfSimulationSteps)) ; ++step)
+      {
+      sofa::simulation::getSimulation()->animate(root.get(), dt);
+      //sofa::simulation::getSimulation()->animate(root.get());
+
+      const double error = meanSquareError(skullDOF, warpedCloudDOF, indexMap);
+      double mean = (lastError + error) / 2.;
+      stdDeviation = sqrt((pow(lastError - mean, 2) + pow(error - mean, 2)) / 2.);
+      //errorChange =  fabs(lastError-error) / lastError;
+      lastError = error;
+
+      if (Verbose)
+        {
+        std::cout << " Iteration #" << step << " (distance: " << lastError
+                    << " std: " << stdDeviation << std::endl;
+        }
+      }
     }
   vtkNew<vtkPolyData> posedSurface;
-  initMesh(posedSurface.GetPointer(), skullDOFNode);
-  if (!IsMeshInRAS)
+  initMesh(posedSurface.GetPointer(), skullDOFNode,Verbose);
+  
+  if (Verbose)
     {
-    vtkNew<vtkTransform> transform;
-    transform->RotateZ(180.0);
-
-    vtkNew<vtkTransformPolyDataFilter> transformer;
-    transformer->SetInput(posedSurface.GetPointer());
-    transformer->SetTransform(transform.GetPointer());
-    transformer->Update();
-
-    bender::IOUtils::WritePolyData(transformer->GetOutput(), OutputTetMesh);
+    std::cout << "Saving Polydata..." << std::endl;
     }
-  else
-    {
-    bender::IOUtils::WritePolyData(posedSurface.GetPointer(), OutputTetMesh);
-    }
+  bender::IOUtils::WritePolyData(posedSurface.GetPointer(), OutputTetMesh);
 
   if (Verbose)
     {

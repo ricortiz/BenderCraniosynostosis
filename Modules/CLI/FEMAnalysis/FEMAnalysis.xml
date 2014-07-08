@@ -78,7 +78,8 @@
       <longflag>--timeIntegratorType</longflag>
       <description><![CDATA[Type of time integrator to use.]]></description>
       <default>Implicit</default>
-      <element>Explicit</element>  
+      <element>Implicit</element>
+      <element>Explicit</element>
     </string-enumeration>
     <double>
       <name>pressureForce</name>
@@ -101,7 +102,7 @@
       <description><![CDATA[Fixed time-step.]]></description>
       <default>0.01</default>
     </double>
-    
+
     <integer>
       <name>MinimumStandardDeviation</name>
       <label>Minimum standard deviation</label>
@@ -113,7 +114,7 @@
         <maximum>1000</maximum>
         <step>1</step>
       </constraints>
-    </integer>      
+    </integer>
     <boolean>
       <name>linearFEM</name>
       <label>Linear FEM</label>
@@ -135,7 +136,7 @@
       <description><![CDATA[An uniform Poisson ratio parameter.]]></description>
       <default>.22</default>
     </double>
-  
+
   </parameters>
   <parameters>
     <label>Animation</label>
@@ -151,15 +152,6 @@
   <parameters advanced="true">
     <label>Advanced</label>
     <description><![CDATA[Advanced properties]]></description>
-
-    <boolean>
-      <name>IsMeshInRAS</name>
-      <label>Meshes in RAS</label>
-      <description><![CDATA[Whether the input meshes are already in the RAS(Right, Anterior, Superior) coordinate system (true) or in LPS (Left, Posterior, Superior) coordinate system (false, default). If not, it will be be internally transformed into RAS.]]></description>
-      <longflag>--meshInRAS</longflag>
-      <default>false</default>
-    </boolean>
-
     <boolean>
       <name>Verbose</name>
       <label>Verbose</label>

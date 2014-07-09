@@ -310,6 +310,7 @@ MechanicalObject<Vec3Types>::SPtr loadFixedPointCloud(
 MechanicalObject<Vec3Types>::SPtr loadWarpedPointCloud(
   Node * parentNode,
   itk::PointSet<float,3> *fixedPointCloud,
+  itk::PointSet<float,3> *movingPointCloud,
   unsigned int numPoints = 10,
   bool Verbose = false
   )
@@ -1223,7 +1224,7 @@ int main(int argc, char* argv[])
   if(transform.IsNull())
   {
   warpedCloudDOF = loadWarpedPointCloud(
-    warpedCloudDOFNode.get(), fixedPointCloud, 4u,Verbose);
+    warpedCloudDOFNode.get(), fixedPointCloud, movingPointCloud, 4u,Verbose);
   }
   else
   {
@@ -1371,11 +1372,11 @@ int main(int argc, char* argv[])
 //     const size_t minimumNumberOfSteps = 150;
 
     double lastError = 1.;
-    double stdDeviation = 0.;
+    double stdDeviation = 1000.;
 
     // We can't use the distance error directly because the simulation might
     // oscillate.
-    for (size_t step = 0;stdDeviation > MinimumStandardDeviation ||
+    for (size_t step = 0;stdDeviation > MinimumStandardDeviation &&
          (step < static_cast<size_t>(MaximumNumberOfSimulationSteps)) ; ++step)
       {
       sofa::simulation::getSimulation()->animate(root.get(), dt);

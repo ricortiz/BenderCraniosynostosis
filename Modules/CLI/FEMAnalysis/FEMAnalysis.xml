@@ -103,18 +103,18 @@
       <default>0.01</default>
     </double>
 
-    <integer>
+    <double>
       <name>MinimumStandardDeviation</name>
       <label>Minimum standard deviation</label>
       <longflag>--minStdDev</longflag>
       <description><![CDATA[The simulation stops when there is no more significant change between two steps or if the maximum number of steps is reached.]]></description>
       <default>1</default>
       <constraints>
-        <minimum>0</minimum>
+        <minimum>0.000001</minimum>
         <maximum>1000</maximum>
-        <step>1</step>
+        <step>0.00001</step>
       </constraints>
-    </integer>
+    </double>
     <boolean>
       <name>linearFEM</name>
       <label>Linear FEM</label>

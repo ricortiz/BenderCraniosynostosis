@@ -161,7 +161,8 @@ public:
       {
       return;
       }
-    std::cout << "Position = "  << optimizer->GetCachedCurrentPosition() << std::endl;
+    std::cout << "Position = "  << optimizer->GetCachedCurrentPosition() <<
+      std::endl;
     std::cout << "Iteration = " << ++iteration << std::endl;
 
   }
@@ -300,7 +301,7 @@ MechanicalObject<Vec3Types>::SPtr loadFixedPointCloud(
 
   // Create the Point Set Topology
   PointSetTopologyContainer::SPtr pointSetTopology =
-  addNew<PointSetTopologyContainer>(parentNode, "Topology");
+    addNew<PointSetTopologyContainer>(parentNode, "Topology");
   pointSetTopology->getPointDataArray().setParent(&fixedCloudDOF->x);
 
   return fixedCloudDOF;
@@ -321,54 +322,54 @@ MechanicalObject<Vec3Types>::SPtr loadWarpedPointCloud(
               << std::endl;
     std::cout << "Create warped point mechanical object..." << std::endl;
     }
-    typedef itk::PointSet<float,3> PointCloudType;
-    typedef PointCloudType::PointIdentifier PointIdentifier;
-    typedef PointCloudType::PointsContainer PointsContainer;
-    typedef PointCloudType::PointType PointType;
+  typedef itk::PointSet<float,3> PointCloudType;
+  typedef PointCloudType::PointIdentifier PointIdentifier;
+  typedef PointCloudType::PointsContainer PointsContainer;
+  typedef PointCloudType::PointType PointType;
 
-    itk::PointsLocator<PointCloudType::PointsContainer>::Pointer pointsLocator =
-        itk::PointsLocator<PointCloudType::PointsContainer>::New();
-    pointsLocator->SetPoints(movingPointCloud->GetPoints());
-    pointsLocator->Initialize();
+  itk::PointsLocator<PointCloudType::PointsContainer>::Pointer pointsLocator =
+    itk::PointsLocator<PointCloudType::PointsContainer>::New();
+  pointsLocator->SetPoints(movingPointCloud->GetPoints());
+  pointsLocator->Initialize();
 
-    PointCloudType::PointIdentifier size = fixedPointCloud->GetNumberOfPoints();
+  PointCloudType::PointIdentifier size = fixedPointCloud->GetNumberOfPoints();
 
-    PointsContainer::Pointer outputPoints = PointsContainer::New();
-    outputPoints->resize(size);
-    for(PointCloudType::PointIdentifier i = 0; i < size; ++i)
+  PointsContainer::Pointer outputPoints = PointsContainer::New();
+  outputPoints->resize(size);
+  for(PointCloudType::PointIdentifier i = 0; i < size; ++i)
     {
-        std::vector<PointCloudType::PointIdentifier> points;
-        PointType dx, fixedPoint, movingPoint;
+    std::vector<PointCloudType::PointIdentifier> points;
+    PointType                                    dx, fixedPoint, movingPoint;
 
-        fixedPoint = fixedPointCloud->GetPoint(i);
-        pointsLocator->FindClosestNPoints(fixedPoint,numPoints,points);
-        dx.Fill(0);
-        for(size_t k = 0; k < points.size(); ++k)
-        {
-            PointType p = movingPointCloud->GetPoint(points[k]);
-            dx += (p-fixedPoint );
-        }
-        float scale = 1.0f/points.size();
-        dx[0]*=scale;
-        dx[1]*=scale;
-        dx[2]*=scale;
-        movingPoint[0] = fixedPoint[0]+dx[0];
-        movingPoint[1] = fixedPoint[1]+dx[1];
-        movingPoint[2] = fixedPoint[2]+dx[2];
-        outputPoints->SetElement(i,movingPoint);
+    fixedPoint = fixedPointCloud->GetPoint(i);
+    pointsLocator->FindClosestNPoints(fixedPoint,numPoints,points);
+    dx.Fill(0);
+    for(size_t k = 0; k < points.size(); ++k)
+      {
+      PointType p = movingPointCloud->GetPoint(points[k]);
+      dx += (p-fixedPoint );
+      }
+    float scale = 1.0f/points.size();
+    dx[0]         *=scale;
+    dx[1]         *=scale;
+    dx[2]         *=scale;
+    movingPoint[0] = fixedPoint[0]+dx[0];
+    movingPoint[1] = fixedPoint[1]+dx[1];
+    movingPoint[2] = fixedPoint[2]+dx[2];
+    outputPoints->SetElement(i,movingPoint);
     }
 
-    MechanicalObject<Vec3Types>::SPtr movingCloudDOF =
+  MechanicalObject<Vec3Types>::SPtr movingCloudDOF =
     addNew<MechanicalObject<Vec3Types> >(parentNode, "movingCloudDOF");
 
-    copyVertices(outputPoints,movingCloudDOF.get());
+  copyVertices(outputPoints,movingCloudDOF.get());
 
-    // Create the Point Set Topology
-    PointSetTopologyContainer::SPtr pointSetTopology =
+  // Create the Point Set Topology
+  PointSetTopologyContainer::SPtr pointSetTopology =
     addNew<PointSetTopologyContainer>(parentNode, "Topology");
-    pointSetTopology->getPointDataArray().setParent(&movingCloudDOF->x);
+  pointSetTopology->getPointDataArray().setParent(&movingCloudDOF->x);
 
-    return movingCloudDOF;
+  return movingCloudDOF;
 }
 
 // ---------------------------------------------------------------------
@@ -404,18 +405,20 @@ MechanicalObject<Vec3Types>::SPtr loadWarpedPointCloud(
     fixedPointCloud->GetPoints();
   itk::TranslationTransform< double,3>::InputPointType  fixedPoint;
   itk::TranslationTransform< double,3>::OutputPointType movingPoint;
-  itk::TranslationTransform< double,3>::InverseTransformBasePointer inverseTransform = transform->GetInverseTransform();
+  itk::TranslationTransform< double,
+                             3>::InverseTransformBasePointer inverseTransform =
+    transform->GetInverseTransform();
 
   warpedCloudDOF->resize(numberOfPoints);
   Data<MechanicalObject<Vec3Types>::VecCoord> *x =
     warpedCloudDOF->write(sofa::core::VecCoordId::position());
 
-  BinaryImageType::IndexType index;
+  BinaryImageType::IndexType             index;
   MechanicalObject<Vec3Types>::VecCoord &vertices = *x->beginEdit();
   for(size_t i = 0; i < numberOfPoints; ++i)
     {
-    fixedPoint  = points->GetElement(i);
-    movingPoint = inverseTransform->TransformPoint(fixedPoint);
+    fixedPoint     = points->GetElement(i);
+    movingPoint    = inverseTransform->TransformPoint(fixedPoint);
     vertices[i][0] = movingPoint[0];
     vertices[i][1] = movingPoint[1];
     vertices[i][2] = movingPoint[2];
@@ -424,7 +427,7 @@ MechanicalObject<Vec3Types>::SPtr loadWarpedPointCloud(
 
   // Create the Point Set Topology
   PointSetTopologyContainer::SPtr pointSetTopology =
-  addNew<PointSetTopologyContainer>(parentNode, "Topology");
+    addNew<PointSetTopologyContainer>(parentNode, "Topology");
   pointSetTopology->getPointDataArray().setParent(&warpedCloudDOF->x);
 
   return warpedCloudDOF;
@@ -525,7 +528,8 @@ MechanicalObject<Vec3Types>::SPtr loadMesh(Node* parentNode,
     {
     std::cout << "************************************************************"
               << std::endl;
-    std::cout << "Create mechanical object with tetrahedral mesh..." << std::endl;
+    std::cout << "Create mechanical object with tetrahedral mesh..." <<
+      std::endl;
     }
   typedef itk::Mesh<float,3>::CellType CellType;
   typedef itk::Mesh<float,3>::CellsContainer::ConstIterator CellIterator;
@@ -557,7 +561,8 @@ MechanicalObject<Vec3Types>::SPtr loadMesh(Node* parentNode,
 
   if (Verbose)
     {
-    std::cout << "Total # of tetrahedra: " << polyMesh->GetNumberOfCells() << std::endl;
+    std::cout << "Total # of tetrahedra: " << polyMesh->GetNumberOfCells() <<
+      std::endl;
     }
   CellIterator cellIterator = tetras->Begin();
   CellIterator cellEnd      = tetras->End();
@@ -614,95 +619,102 @@ void createEulerSolverNode(Node::SPtr         parentNode,
 
 //------------------------------------------------------------------------------
 void computeVonMisesStress(TetrahedronFEMForceField<Vec3Types>* FemSolver,
-    sofa::helper::vector<Vec3Types::Real> &vonMisesStress,
-    sofa::helper::vector<Vec<6,Vec3Types::Real> > &strain,
-    sofa::helper::vector<VecNoInit<6,Vec3Types::Real> > &stress,
-    VecCoord3 &displacements, bool Verbose
+                           sofa::helper::vector<Vec3Types::Real> &vonMisesStress,
+                           sofa::helper::vector<Vec<6,Vec3Types::Real> > &strain,
+                           sofa::helper::vector<VecNoInit<6,Vec3Types::Real> > &stress,
+                           VecCoord3 &displacements, bool Verbose
 
-)
+                           )
 {
-    if (Verbose)
+  if (Verbose)
     {
     std::cout << "************************************************************"
               << std::endl;
     std::cout << "Computing stresses..." << std::endl;
     }
-    MechanicalObject3* mechanicalObject;
-    FemSolver->getContext()->get(mechanicalObject);
+  MechanicalObject3* mechanicalObject;
+  FemSolver->getContext()->get(mechanicalObject);
 
-    BaseMeshTopology* mesh;
-    FemSolver->getContext()->get(mesh);
+  BaseMeshTopology* mesh;
+  FemSolver->getContext()->get(mesh);
 
-    const VecCoord3& X = *mechanicalObject->getX();
-    ReadAccessor<Data<VecCoord3> > X0 =  FemSolver->_initialPoints;
+  const VecCoord3&               X  = *mechanicalObject->getX();
+  ReadAccessor<Data<VecCoord3> > X0 =  FemSolver->_initialPoints;
 
-    for (size_t i = 0; i < X0.size(); i++)
-        displacements[i] = (X[i] - X0[i]);
+  for (size_t i = 0; i < X0.size(); i++)
+    displacements[i] = (X[i] - X0[i]);
 
 //     std::cout << "Displ = " << displacements << std::endl;
 
-    BaseMeshTopology::SeqTetrahedra::const_iterator it;
-    size_t el;
+  BaseMeshTopology::SeqTetrahedra::const_iterator it;
+  size_t                                          el;
 
-    for(it = mesh->getTetrahedra().begin(), el = 0 ; it != mesh->getTetrahedra().end() ; ++it, ++el)
+  for(it = mesh->getTetrahedra().begin(), el = 0;
+      it != mesh->getTetrahedra().end(); ++it, ++el)
     {
-        Vec<6,Vec3Types::Real> vStrain;
-        Mat<3,3,Vec3Types::Real> gradU;
-        Mat<4,4,Vec3Types::Real>& shf = FemSolver->elemShapeFun[el];
+    Vec<6,Vec3Types::Real>    vStrain;
+    Mat<3,3,Vec3Types::Real>  gradU;
+    Mat<4,4,Vec3Types::Real>& shf = FemSolver->elemShapeFun[el];
 
-        /// compute gradU
-        for (size_t k = 0; k < 3; ++k) {
-            for (size_t l = 0; l < 3; ++l)  {
-                gradU[k][l] = 0.0;
-                for (size_t m = 0; m < 4; ++m)
-                    gradU[k][l] += shf[l+1][m] * displacements[(*it)[m]][k];
-            }
+    /// compute gradU
+    for (size_t k = 0; k < 3; ++k) {
+      for (size_t l = 0; l < 3; ++l)  {
+        gradU[k][l] = 0.0;
+        for (size_t m = 0; m < 4; ++m)
+          gradU[k][l] += shf[l+1][m] * displacements[(*it)[m]][k];
         }
+      }
 //         std::cout << "gradU = " << gradU<< std::endl;
 
-        Mat<3,3,Vec3Types::Real> strainMatrix = ((Vec3Types::Real)0.5)*(gradU + gradU.transposed() + gradU.transposed()*gradU);
+    Mat<3,3,
+        Vec3Types::Real> strainMatrix = ((Vec3Types::Real)0.5)*
+                                        (gradU + gradU.transposed() +
+                                         gradU.transposed()*gradU);
 
-        // Voigt notation for strain tensor
-        for (size_t i = 0; i < 3; ++i)
-            vStrain[i] = strainMatrix[i][i];
+    // Voigt notation for strain tensor
+    for (size_t i = 0; i < 3; ++i)
+      vStrain[i] = strainMatrix[i][i];
 
-        vStrain[3] = strainMatrix[1][2];
-        vStrain[4] = strainMatrix[0][2];
-        vStrain[5] = strainMatrix[0][1];
+    vStrain[3] = strainMatrix[1][2];
+    vStrain[4] = strainMatrix[0][2];
+    vStrain[5] = strainMatrix[0][1];
 
-        Vec3Types::Real lambda = FemSolver->elemLambda[el];
-        Vec3Types::Real mu = FemSolver->elemMu[el];
+    Vec3Types::Real lambda = FemSolver->elemLambda[el];
+    Vec3Types::Real mu     = FemSolver->elemMu[el];
 
-        /// stress
-        VecNoInit<6,Vec3Types::Real> s;
+    /// stress
+    VecNoInit<6,Vec3Types::Real> s;
 
-        Vec3Types::Real traceStrain = 0.0;
-        for (size_t k = 0; k < 3; ++k) {
-            traceStrain += vStrain[k];
-            s[k] = vStrain[k]*2*mu;
-        }
+    Vec3Types::Real traceStrain = 0.0;
+    for (size_t k = 0; k < 3; ++k) {
+      traceStrain += vStrain[k];
+      s[k]         = vStrain[k]*2*mu;
+      }
 
-        for (size_t k = 3; k < 6; ++k)
-            s[k] = vStrain[k]*2*mu;
+    for (size_t k = 3; k < 6; ++k)
+      s[k] = vStrain[k]*2*mu;
 
-        for (size_t k = 0; k < 3; ++k)
-            s[k] += lambda*traceStrain;
+    for (size_t k = 0; k < 3; ++k)
+      s[k] += lambda*traceStrain;
 
-        Vec3Types::Real vM;
-        vM = sofa::helper::rsqrt(s[0]*s[0] + s[1]*s[1] + s[2]*s[2] - s[0]*s[1] - s[1]*s[2] - s[2]*s[0] + 3*s[3]*s[3] + 3*s[4]*s[4] + 3*s[5]*s[5]);
-        if (vM < 1e-10)
-            vM = 0.0;
+    Vec3Types::Real vM;
+    vM = sofa::helper::rsqrt(
+      s[0]*s[0] + s[1]*s[1] + s[2]*s[2] - s[0]*s[1] - s[1]*s[2] - s[2]*s[0] + 3*
+      s[3]*s[3] + 3*s[4]*s[4] + 3*s[5]*s[5]);
+    if (vM < 1e-10)
+      vM = 0.0;
 
-        vonMisesStress[el]=(vM);
-        stress[el]=(s);
-        strain[el]=(vStrain);
+    vonMisesStress[el]=(vM);
+    stress[el]        =(s);
+    strain[el]        =(vStrain);
 
 //         std::cout << "VMStress: " << vM << std::endl;
     }
 }
 
 //------------------------------------------------------------------------------
-void initMesh(vtkUnstructuredGrid* outputData, Node::SPtr skullMeshDOF, bool Verbose)
+void initMesh(vtkUnstructuredGrid* outputData, Node::SPtr skullMeshDOF,
+              bool Verbose)
 {
   MeshTopology *     topology = skullMeshDOF->getNodeObject<MeshTopology>();
   MechanicalObject3 *dof      =
@@ -717,7 +729,7 @@ void initMesh(vtkUnstructuredGrid* outputData, Node::SPtr skullMeshDOF, bool Ver
       topology->getPY(pointId),
       topology->getPZ(pointId));
     }
-    outputData->SetPoints(points.GetPointer());
+  outputData->SetPoints(points.GetPointer());
   // Cells
   vtkNew<vtkCellArray> cells;
   for (vtkIdType cellId = 0; cellId < topology->getNbTetras(); ++cellId)
@@ -760,7 +772,9 @@ void initMesh(vtkUnstructuredGrid* outputData, Node::SPtr skullMeshDOF, bool Ver
   strainEigenvalues->SetName("Strain Eigenvalues");
   strainEigenvalues->SetNumberOfValues(topology->getNbTetras());
 
-  TetrahedronFEMForceField<Vec3Types>* FEM = dynamic_cast<TetrahedronFEMForceField<Vec3Types>*>(skullMeshDOF->getObject("SkullMesh_femSolver"));
+  TetrahedronFEMForceField<Vec3Types>* FEM =
+    dynamic_cast<TetrahedronFEMForceField<Vec3Types>*>(skullMeshDOF->getObject(
+                                                         "SkullMesh_femSolver"));
 
   sofa::helper::vector<Vec3Types::Real> vmStress;
   vmStress.resize(topology->getNbTetras());
@@ -800,19 +814,19 @@ void initMesh(vtkUnstructuredGrid* outputData, Node::SPtr skullMeshDOF, bool Ver
     }
 
   Eigen::EigenSolver<Eigen::Matrix3d> eigenSolver;
-  Eigen::Matrix3d stressMatrix, strainMatrix;
+  Eigen::Matrix3d                     stressMatrix, strainMatrix;
   for(int i = 0, end = topology->getNbTetras(); i < end; ++i)
-  {
+    {
     vonMisesStress->SetValue(i,vmStress[i]);
 
     // Voigt tensor notation to matrix
-    stressMatrix << stress[i][0] , stress[i][5] , stress[i][4],
-                    stress[i][5] , stress[i][1] , stress[i][3],
-                    stress[i][4] , stress[i][3] , stress[i][2];
+    stressMatrix << stress[i][0], stress[i][5], stress[i][4],
+      stress[i][5], stress[i][1], stress[i][3],
+      stress[i][4], stress[i][3], stress[i][2];
 
-    strainMatrix << strain[i][0] , strain[i][5] , strain[i][4],
-                    strain[i][5] , strain[i][1] , strain[i][3],
-                    strain[i][4] , strain[i][3] , strain[i][2];
+    strainMatrix << strain[i][0], strain[i][5], strain[i][4],
+      strain[i][5], strain[i][1], strain[i][3],
+      strain[i][4], strain[i][3], strain[i][2];
 
 //     std::cout << stressMatrix << std::endl;
 //     std::cout << strainMatrix << std::endl;
@@ -833,22 +847,22 @@ void initMesh(vtkUnstructuredGrid* outputData, Node::SPtr skullMeshDOF, bool Ver
 //
 //     strainEigenvalues->SetTupleValue(i,e);
 
-  }
+    }
 
-    if (Verbose)
+  if (Verbose)
     {
     std::cout << "************************************************************"
-                << std::endl;
+              << std::endl;
     std::cout << "Adding Point Data Arrays..." << std::endl;
     }
   outputData->GetPointData()->AddArray(forceVectors.GetPointer());
   outputData->GetPointData()->AddArray(displacements.GetPointer());
 
 
-    if (Verbose)
+  if (Verbose)
     {
     std::cout << "************************************************************"
-                << std::endl;
+              << std::endl;
     std::cout << "Adding cell Data Arrays..." << std::endl;
     }
   outputData->GetCellData()->AddArray(vonMisesStress.GetPointer());
@@ -860,7 +874,7 @@ void initMesh(vtkUnstructuredGrid* outputData, Node::SPtr skullMeshDOF, bool Ver
 double meanSquareError(MechanicalObject<Vec3Types>::SPtr mesh1,
                        MechanicalObject<Vec3Types>::SPtr mesh2,
                        const std::vector<itk::PointSet<float,3>::PointIdentifier> &indexMap
-                      )
+                       )
 {
   const Data<MechanicalObject<Vec3Types>::VecCoord>* position1 =
     mesh1->read(VecCoordId::position());
@@ -887,9 +901,9 @@ double meanSquareError(MechanicalObject<Vec3Types>::SPtr mesh1,
     return -1.;
     }
 
-  double                                                error = 0.;
+  double error = 0.;
 
-  for(size_t i = 0, j = 0; j < numberOfPoints ; ++i, ++j)
+  for(size_t i = 0, j = 0; j < numberOfPoints; ++i, ++j)
     {
     Vector3 dx = vertices1[indexMap[j]] - vertices2[j];
     error += dx.norm2() / numberOfPoints;
@@ -906,10 +920,10 @@ registerPointClouds(itk::PointSet<float,3> *fixedMesh,
                     const double &epsilonFunction,
                     bool Verbose = false)
 {
-    if (Verbose)
+  if (Verbose)
     {
     std::cout << "************************************************************"
-                << std::endl;
+              << std::endl;
     std::cout << "Register meshes using ICP..." << std::endl;
     }
   typedef itk::PointSet<float,3> PointSetType;
@@ -990,12 +1004,12 @@ registerPointClouds(itk::PointSet<float,3> *fixedMesh,
   //-------------------------------------------------
   bool useDistanceMap = false;
   if(useDistanceMap)
-  {
+    {
     typedef itk::Image< unsigned char,  3 >  BinaryImageType;
     typedef itk::PointSetToImageFilter<PointSetType,
-                                        BinaryImageType> PointsToImageFilterType;
+                                       BinaryImageType> PointsToImageFilterType;
     PointsToImageFilterType::Pointer pointsToImageFilter =
-        PointsToImageFilterType::New();
+      PointsToImageFilterType::New();
     pointsToImageFilter->SetInput( fixedMesh );
     BinaryImageType::SpacingType spacing;
     spacing.Fill( 1.0 );
@@ -1007,13 +1021,13 @@ registerPointClouds(itk::PointSet<float,3> *fixedMesh,
     BinaryImageType::Pointer binaryImage = pointsToImageFilter->GetOutput();
     typedef itk::Image< unsigned short, 3 >  DistanceImageType;
     typedef itk::DanielssonDistanceMapImageFilter<BinaryImageType,
-                                                    DistanceImageType>
-        DistanceFilterType;
+                                                  DistanceImageType>
+      DistanceFilterType;
     DistanceFilterType::Pointer distanceFilter = DistanceFilterType::New();
     distanceFilter->SetInput( binaryImage );
     distanceFilter->Update();
     metric->SetDistanceMap( distanceFilter->GetOutput() );
-  }
+    }
   // Connect an observer
   CommandIterationUpdate::Pointer observer = CommandIterationUpdate::New();
   optimizer->AddObserver( itk::IterationEvent(), observer );
@@ -1039,22 +1053,25 @@ registerPointClouds(itk::PointSet<float,3> *fixedMesh,
 
 void mapFixedPointCloudToTetMesh(itk::PointSet<float,3> *pointCloud,
                                  itk::PointSet<float,3> *mesh,
-                                 std::vector<itk::PointSet<float,3>::PointIdentifier> &indexMap, bool Verbose)
+                                 std::vector<itk::PointSet<float,
+                                                           3>::PointIdentifier> &indexMap,
+                                 bool Verbose)
 {
-    typedef itk::PointSet<float,3> PointCloudType;
+  typedef itk::PointSet<float,3> PointCloudType;
 
-    itk::PointsLocator<PointCloudType::PointsContainer>::Pointer pointsLocator =
-        itk::PointsLocator<PointCloudType::PointsContainer>::New();
-    pointsLocator->SetPoints(mesh->GetPoints());
-    pointsLocator->Initialize();
+  itk::PointsLocator<PointCloudType::PointsContainer>::Pointer pointsLocator =
+    itk::PointsLocator<PointCloudType::PointsContainer>::New();
+  pointsLocator->SetPoints(mesh->GetPoints());
+  pointsLocator->Initialize();
 
-    PointCloudType::PointIdentifier size = pointCloud->GetNumberOfPoints();
+  PointCloudType::PointIdentifier size = pointCloud->GetNumberOfPoints();
 
-    indexMap.reserve(size);
-    for(PointCloudType::PointIdentifier i = 0; i < size; ++i)
+  indexMap.reserve(size);
+  for(PointCloudType::PointIdentifier i = 0; i < size; ++i)
     {
-        PointCloudType::PointIdentifier index = pointsLocator->FindClosestPoint(pointCloud->GetPoint(i));
-        indexMap.push_back(index);
+    PointCloudType::PointIdentifier index = pointsLocator->FindClosestPoint(pointCloud->GetPoint(
+        i));
+    indexMap.push_back(index);
     }
 
   if (Verbose)
@@ -1091,7 +1108,7 @@ itk::TranslationTransform<double,
 
     ++transformIt;
     }
-    return transform;
+  return transform;
 }
 
 //------------------------------------------------------------------------------
@@ -1169,13 +1186,15 @@ int main(int argc, char* argv[])
     }
 
   if (Verbose)
-  {
+    {
     std::cout << "Done reading mesh..." << std::endl;
-  }
+    }
 
-  MeshType::Pointer       tetMesh       = vtkTetMeshReader->GetOutput();
-  PointCloudType::Pointer fixedPointCloud = vtkFixedPointCloudReader->GetOutput();
-  PointCloudType::Pointer movingPointCloud = vtkMovingPointCloudReader->GetOutput();
+  MeshType::Pointer       tetMesh         = vtkTetMeshReader->GetOutput();
+  PointCloudType::Pointer fixedPointCloud =
+    vtkFixedPointCloudReader->GetOutput();
+  PointCloudType::Pointer movingPointCloud =
+    vtkMovingPointCloudReader->GetOutput();
 
   itk::TranslationTransform<double,3>::Pointer transform;
   if(InputTransform.size() > 0)
@@ -1206,11 +1225,12 @@ int main(int argc, char* argv[])
       }
     }
 
-  if((InputTransform.size() > 0 || OutputTransform.size() > 0) && transform.IsNull())
-  {
-      std::cerr << "Null Transform!" << std::endl;
-      return EXIT_FAILURE;
-  }
+  if((InputTransform.size() > 0 ||
+      OutputTransform.size() > 0) && transform.IsNull())
+    {
+    std::cerr << "Null Transform!" << std::endl;
+    return EXIT_FAILURE;
+    }
 
   // Create a scene node
   Node::SPtr sceneNode = root->createChild("FEMSimulation");
@@ -1218,23 +1238,23 @@ int main(int argc, char* argv[])
   // Time stepper
   createEulerSolverNode(sceneNode.get(),TimeIntegratorType);
 
-  Node::SPtr warpedCloudDOFNode                    = sceneNode->createChild(
+  Node::SPtr warpedCloudDOFNode = sceneNode->createChild(
     "WarpedDOFCloud");
   MechanicalObject<Vec3Types>::SPtr warpedCloudDOF;
   if(transform.IsNull())
-  {
-  warpedCloudDOF = loadWarpedPointCloud(
-    warpedCloudDOFNode.get(), fixedPointCloud, movingPointCloud, 4u,Verbose);
-  }
+    {
+    warpedCloudDOF = loadWarpedPointCloud(
+      warpedCloudDOFNode.get(), fixedPointCloud, movingPointCloud, 4u,Verbose);
+    }
   else
-  {
-  warpedCloudDOF = loadWarpedPointCloud(
-    warpedCloudDOFNode.get(),transform.GetPointer(), fixedPointCloud,Verbose);
-  }
+    {
+    warpedCloudDOF = loadWarpedPointCloud(
+      warpedCloudDOFNode.get(),transform.GetPointer(), fixedPointCloud,Verbose);
+    }
 
   // Fix the positions of these points
   FixedConstraint3::SPtr fixWarpedDOF = addNew<FixedConstraint3>(
-      warpedCloudDOFNode.get(),"fixedContraint");
+    warpedCloudDOFNode.get(),"fixedContraint");
   fixWarpedDOF->f_fixAll.setValue(true);
 
   if (Verbose)
@@ -1250,7 +1270,7 @@ int main(int argc, char* argv[])
   // Create mesh dof
   MechanicalObject<Vec3Types>::SPtr skullDOF = loadMesh(
     skullDOFNode.get(), tetMesh,Verbose);
-  UniformMass3::SPtr skullMass          = addNew<UniformMass3>(
+  UniformMass3::SPtr skullMass = addNew<UniformMass3>(
     skullDOFNode.get(),"Mass");
   skullMass->setTotalMass(100);
 
@@ -1268,14 +1288,14 @@ int main(int argc, char* argv[])
   box[5] = 10;
 
   // Crete a fix contraint to fix the base of the skull
-  BoxROI<Vec3Types>::SPtr boxRoi       = addNew<BoxROI<Vec3Types> >(
+  BoxROI<Vec3Types>::SPtr boxRoi = addNew<BoxROI<Vec3Types> >(
     skullDOFNode.get(),"SkullBaseRoi");
   boxRoi->boxes.beginEdit()->push_back(box);
   boxRoi->boxes.endEdit();
   boxRoi->p_drawBoxes.setValue(true);
 
   FixedConstraint3::SPtr fixedConstraint = addNew<FixedConstraint3>(
-      skullDOFNode.get(),"fixedContraint");
+    skullDOFNode.get(),"fixedContraint");
   fixedConstraint->f_indices.setParent(&boxRoi->f_indices);
 
   if (Verbose)
@@ -1287,25 +1307,30 @@ int main(int argc, char* argv[])
   std::vector<PointCloudType::PointIdentifier> indexMap;
   mapFixedPointCloudToTetMesh(fixedPointCloud,tetMesh,indexMap,Verbose);
   StiffSpringForceField<Vec3Types>::SPtr loads =
-  sofa::core::objectmodel::New<StiffSpringForceField<Vec3Types> >(skullDOF.get(),warpedCloudDOF.get());
+    sofa::core::objectmodel::New<StiffSpringForceField<Vec3Types> >(
+      skullDOF.get(),warpedCloudDOF.get());
   loads->setName("Force Loads");
   skullDOFNode->addObject(loads);
-  const VecCoord3 &meshPositions = *skullDOF->getX();
+  const VecCoord3 &meshPositions        = *skullDOF->getX();
   const VecCoord3 &warpedCloudPositions = *warpedCloudDOF->getX();
-  double distance = 1.;
-  const vtkIdType numberOfPoints = indexMap.size();
-  size_t sample = 0;
+  double           distance             = 1.;
+  const vtkIdType  numberOfPoints       = indexMap.size();
+  size_t           sample               = 0;
   for (vtkIdType pointId = 0; pointId < numberOfPoints; ++pointId)
     {
     if (!(sample++ % 1))
       {
-      distance = initialDistanceFraction*(meshPositions[indexMap[pointId]]-warpedCloudPositions[pointId]).norm();
-      loads->addSpring(indexMap[pointId], pointId, pressureForce, 0.0, distance);
+      distance = initialDistanceFraction*
+                 (meshPositions[indexMap[pointId]]-
+                  warpedCloudPositions[pointId]).norm();
+      loads->addSpring(indexMap[pointId], pointId, pressureForce, 0.0,
+        distance);
       }
     }
 
   const sofa::core::objectmodel::TagSet &tags = skullDOF->getTags();
-  for (sofa::core::objectmodel::TagSet::const_iterator it=tags.begin(); it!=tags.end(); ++it)
+  for (sofa::core::objectmodel::TagSet::const_iterator it=tags.begin();
+       it!=tags.end(); ++it)
     loads->addTag(*it);
 
   if (Verbose)
@@ -1371,31 +1396,32 @@ int main(int argc, char* argv[])
     // Forces take time to start moving the mesh
 //     const size_t minimumNumberOfSteps = 150;
 
-    double lastError = 1.;
+    double lastError    = 1.;
     double stdDeviation = 1000.;
 
     // We can't use the distance error directly because the simulation might
     // oscillate.
-    for (size_t step = 0;stdDeviation > MinimumStandardDeviation &&
-         (step < static_cast<size_t>(MaximumNumberOfSimulationSteps)) ; ++step)
+    for (size_t step = 0; stdDeviation > MinimumStandardDeviation &&
+         (step < static_cast<size_t>(MaximumNumberOfSimulationSteps)); ++step)
       {
       sofa::simulation::getSimulation()->animate(root.get(), dt);
       //sofa::simulation::getSimulation()->animate(root.get());
 
       const double error = meanSquareError(skullDOF, warpedCloudDOF, indexMap);
-      double mean = (lastError + error) / 2.;
-      stdDeviation = sqrt((pow(lastError - mean, 2) + pow(error - mean, 2)) / 2.);
+      double       mean  = (lastError + error) / 2.;
+      stdDeviation =
+        sqrt((pow(lastError - mean, 2) + pow(error - mean, 2)) / 2.);
       //errorChange =  fabs(lastError-error) / lastError;
       lastError = error;
 
       if (Verbose)
         {
         std::cout << " Iteration #" << step << " (distance: " << lastError
-                    << " std: " << stdDeviation << std::endl;
+                  << " std: " << stdDeviation << std::endl;
         }
       }
     }
-  vtkNew<vtkUnstructuredGrid> correctedMesh;
+  vtkNew<vtkUnstructuredGrid>       correctedMesh;
   vtkNew<vtkUnstructuredGridWriter> meshWriter;
   initMesh(correctedMesh.GetPointer(), skullDOFNode,Verbose);
 
